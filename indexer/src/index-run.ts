@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
-import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import type { Client } from "@libsql/client";
 import { type Chunk, chunkDoc } from "./chunk.js";
 import { rootId as computeRootId } from "./config.js";
@@ -145,7 +145,7 @@ function freshDates(
   parsed: ParsedDoc,
 ): DocDates {
   const text = parsed.pages.map((page) => page.text).join("\n");
-  const extracted = extractDates(text, basename(relativePath));
+  const extracted = extractDates(text, relativePath);
   return {
     docId,
     topicKey: topicKeyFor(relativePath),
@@ -153,9 +153,6 @@ function freshDates(
     ...(extracted.effective === undefined
       ? {}
       : { effective: extracted.effective }),
-    ...(extracted.issuedSource === undefined
-      ? {}
-      : { issuedSource: extracted.issuedSource }),
     raw: extracted.raw,
     isLampiran: extracted.isLampiran,
   };

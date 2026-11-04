@@ -3,7 +3,6 @@ export interface ExtractedDates {
   effective?: string;
   raw: string[];
   isLampiran: boolean;
-  issuedSource?: "label" | "filename";
 }
 
 /**
@@ -82,6 +81,11 @@ function filenameDate(basename: string): string | undefined {
   return toIso(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
+function basenameOf(path: string): string {
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
 function isoFromMatch(match: RegExpExecArray): string | undefined {
   const groups = match.groups;
   if (!groups) return undefined;
@@ -112,7 +116,9 @@ function sentenceBounds(text: string, dateIndex: number): [number, number] {
   let start = 0;
   for (const boundary of SENTENCE_BOUNDARIES) {
     const pos = before.lastIndexOf(boundary);
-    if (pos + boundary.length > start) start = pos + boundary.length;
+    if (pos >= 0 && pos + boundary.length > start) {
+      start = pos + boundary.length;
+    }
   }
   const after = text.slice(dateIndex);
   let end = text.length;
@@ -172,7 +178,6 @@ export function extractDates(
   const raw: string[] = [];
   let issued: string | undefined;
   let effective: string | undefined;
-  let issuedSource: "label" | "filename" | undefined;
 
   const dateRe = new RegExp(DATE_PATTERN, "gi");
   for (;;) {
@@ -198,20 +203,16 @@ export function extractDates(
     }
   }
 
-  if (issued !== undefined) {
-    issuedSource = "label";
-  } else if (basename !== undefined) {
-    const fromFilename = filenameDate(basename);
+  if (issued === undefined && basename !== undefined) {
+    const fromFilename = filenameDate(basenameOf(basename));
     if (fromFilename !== undefined) {
       issued = fromFilename;
-      issuedSource = "filename";
     }
   }
 
   return {
     ...(issued === undefined ? {} : { issued }),
     ...(effective === undefined ? {} : { effective }),
-    ...(issuedSource === undefined ? {} : { issuedSource }),
     raw,
     isLampiran: LAMPIRAN_HEADING.test(text),
   };

@@ -132,7 +132,6 @@ describe("extractDates", () => {
       "20220124-RKI-P-ADI-017-SOP Pengawasan Internal.pdf",
     );
     expect(result.issued).toBe("2022-01-24");
-    expect(result.issuedSource).toBe("filename");
     expect(result.raw).toEqual([]);
   });
 
@@ -142,7 +141,6 @@ describe("extractDates", () => {
       "20220124-RKI-P-ADI-017-SOP Pengawasan Internal.pdf",
     );
     expect(result.issued).toBe("2024-01-15");
-    expect(result.issuedSource).toBe("label");
   });
 
   test("invalid filename date is ignored", () => {
@@ -151,7 +149,6 @@ describe("extractDates", () => {
       "20261399-RKI-P-ADI-017-SOP Pengawasan Internal.pdf",
     );
     expect(result.issued).toBeUndefined();
-    expect(result.issuedSource).toBeUndefined();
   });
 
   test("non-prefixed filename is ignored", () => {
@@ -160,6 +157,24 @@ describe("extractDates", () => {
       "SOP Pengawasan Internal.pdf",
     );
     expect(result.issued).toBeUndefined();
-    expect(result.issuedSource).toBeUndefined();
+  });
+
+  test("binds a label in the first 3 characters of the document", () => {
+    const result = extractDates("Ditetapkan 1 Januari 2024");
+    expect(result.issued).toBe("2024-01-01");
+  });
+
+  test("binds issued only when the issued label is nearer than the effective label", () => {
+    const result = extractDates("Ditetapkan 1 Januari 2024 diundangkan sah");
+    expect(result.issued).toBe("2024-01-01");
+    expect(result.effective).toBeUndefined();
+  });
+
+  test("uses the basename for a nested path filename date", () => {
+    const result = extractDates(
+      "Tidak ada label tanggal di sini.",
+      "dir/20220124-x.pdf",
+    );
+    expect(result.issued).toBe("2022-01-24");
   });
 });

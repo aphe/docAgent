@@ -6,7 +6,6 @@ export interface DocDates {
   effective?: string;
   raw: string[];
   isLampiran: boolean;
-  issuedSource?: "label" | "filename";
 }
 
 export type DocStatus = "active" | "superseded" | "unparsable";
