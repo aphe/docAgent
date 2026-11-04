@@ -165,3 +165,4 @@ data-files/*
 data/
 .idea/
 .superpowers/
+/.vitest/
