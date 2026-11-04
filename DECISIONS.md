@@ -10,8 +10,8 @@ Status: draft, living note. Append as answers arrive. Not code.
 
 ## Status
 - User approved (this session): M1 scope = local files only (decision 18); supersession derived from dates with no LLM pass or confirmation step (decision 5). Conflict detection deferred.
-- Local corpus root: `data-files/` in the repo (user choice; `docs/` holds superpowers specs and plans). Contents git-ignored, `data-files/README.md` tracked so the root exists on clone. `data/` (the libsql index) git-ignored. Still open: test questions and success bar (Next steps 3). Non-PDF and no-text-layer shares: Task 1 measurement, not yet run. OCR and `.docx`/`.doc` are out of M1 (decision 19).
-- Plan written: `docs/superpowers/plans/2026-11-03-docs-agent-m1.md` (12 tasks; Task 1 = corpus measurement, needs the root path). Awaiting user choice of execution approach.
+- Local corpus root: `data-files/` in the repo (user choice; `docs/` holds superpowers specs and plans). Contents git-ignored, `data-files/README.md` tracked so the root exists on clone. `data/` (the libsql index) git-ignored. Still open: test questions and success bar (Next steps 3). Non-PDF and no-text-layer shares: measured (line 61). OCR and `.docx`/`.doc` are out of M1 (decision 19).
+- Plan written: `docs/superpowers/plans/2026-11-03-docs-agent-m1.md` (12 tasks; Task 1 = corpus measurement, root `data-files/`). Execution started on branch `m1-build`.
 - Renames and moves within a root: user asked for content-hash tracking; adopted. `doc_id` is a stored UUID; renames match by version key (decision 18). Not yet confirmed as final by the user.
 
 ## Decisions (binding so far)
@@ -58,7 +58,7 @@ Status: draft, living note. Append as answers arrive. Not code.
 - Native Google Docs and `.docx`/`.doc`: deferred. M1 is PDF only (decision 19).
 - Drive location and native Google Docs handling: deferred to next iteration (Drive source). Milestone 1 uses local files.
 - Misplaced documents and the review queue: deferred to next iteration (Drive folder signals; not applicable to local M1).
-- Non-PDF share and no-text-layer PDF share of the local M1 folder: measured by Task 1 (`measureCorpus`). Not yet run.
+- Local corpus measured (Task 1, `measureCorpus`, root `data-files/`): 15 files, 14 PDF and 1 `.md`, 22,454,985 bytes. Sampled 14 PDFs: 1 no-text-layer (7.1%), 26.07 pages per PDF on average. Non-PDF share: 1 of 15 files (`.md`). Copy-restricted count not separated: the measure counts unreadable PDFs as no-text-layer; the real corpus has no read errors (checked). [Task 1 report]
 
 ## Costs (OpenRouter; local infrastructure)
 - Fixed: none. One local libsql file.
@@ -68,6 +68,6 @@ Status: draft, living note. Append as answers arrive. Not code.
 - Storage: one local libsql file. Scale limit is local disk, not D1's 10 GB cap (obsolete under decision 19).
 
 ## Next steps
-1. Run Task 1 corpus measurement on the local root: PDF count, non-PDF extensions, no-text-layer PDF share.
+1. Done: Task 1 corpus measurement run on `data-files/` (result above).
 2. Measure folder mix when the Drive source is designed next iteration.
 3. When the document set is gathered: collect test questions and set the bar; then confirm or replace the provisional models.
