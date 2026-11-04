@@ -211,19 +211,36 @@ function passages(hits: Hit[]): string {
  * (superseded/unparsable) cited documents add warnings listing their paths.
  * Draft mode returns text in both `text` and `draft` and never writes anywhere.
  */
-export async function answer(
+export interface SearchStepResult {
+  hits: Hit[];
+  warnings: string[];
+}
+
+/** Deterministic retrieval step: hybrid search, no generation. */
+export async function searchStep(
   db: Client,
   query: string,
-  mode: "answer" | "draft",
   deps: AnswerDeps = {},
-): Promise<AnswerResponse> {
-  const searchWarnings: string[] = [];
+): Promise<SearchStepResult> {
+  const warnings: string[] = [];
   const hits = await hybridSearch(db, query, {
     topK: TOP_K,
     ...(deps.embed === undefined ? {} : { embed: deps.embed }),
     ...(deps.key === undefined ? {} : { key: deps.key }),
-    warnings: searchWarnings,
+    warnings,
   });
+  return { hits, warnings };
+}
+
+/** Deterministic answer step: builds the reply from search hits. */
+export async function answerFromHits(
+  db: Client,
+  query: string,
+  mode: "answer" | "draft",
+  search: SearchStepResult,
+  deps: AnswerDeps = {},
+): Promise<AnswerResponse> {
+  const { hits, warnings: searchWarnings } = search;
 
   if (hits.length === 0) {
     return {
@@ -282,4 +299,14 @@ export async function answer(
     return { text, citations, alternates, warnings, draft: text };
   }
   return { text, citations, alternates, warnings };
+}
+
+/** One-shot pipeline used by `/query`: search, then answer. */
+export async function answer(
+  db: Client,
+  query: string,
+  mode: "answer" | "draft",
+  deps: AnswerDeps = {},
+): Promise<AnswerResponse> {
+  return answerFromHits(db, query, mode, await searchStep(db, query, deps), deps);
 }
