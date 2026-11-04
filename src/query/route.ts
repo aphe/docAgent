@@ -12,7 +12,7 @@ function badRequest(c: Context, message: string): Response {
 /**
  * Builds the `POST /query` handler. The body is
  * `{ query: string, mode: "answer" | "draft" }`. Dependencies are injected so
- * tests and deployments can swap the embedding and chat functions.
+ * tests and deployments can swap the embedding function.
  */
 export function createQueryHandler(
   db: Client,

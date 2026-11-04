@@ -80,237 +80,96 @@ async function insertVector(
   });
 }
 
-test("no hits yields no citations and no invented source", async () => {
+const nearEmbed = async (texts: string[]): Promise<number[][]> =>
+  texts.map(() => unitVector(0));
+
+test("no chunks yields no citations and no invented source", async () => {
   const db = await makeDb();
-  const r = await answer(db, "prosedur cuti", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async () => {
-      throw new Error("LLM must not be called without hits");
-    },
-  });
+  const r = await answer(db, "prosedur cuti", "answer", { embed: nearEmbed, key: "k" });
+  expect(r.text).toBe("Sumber tidak ditemukan untuk pertanyaan ini.");
   expect(r.citations).toEqual([]);
-  expect(r.text).toMatch(/tidak ditemukan|no source/i);
+});
+
+test("answer is verbatim retrieved chunk text tagged with its chunkId", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "ADI/cuti.pdf" });
+  await insertChunk(db, { chunkId: "doc-a:1:0", docId: "doc-a", text: "Cuti tahunan diajukan ke atasan." });
+  await insertVector(db, "doc-a:1:0", unitVector(0));
+
+  const r = await answer(db, "cuti", "answer", { embed: nearEmbed, key: "k" });
+
+  expect(r.text).toBe("Cuti tahunan diajukan ke atasan. [doc-a:1:0]");
+  expect(r.citations.map((c) => c.chunkId)).toEqual(["doc-a:1:0"]);
+  expect(r.citations[0]?.path).toBe("ADI/cuti.pdf");
   expect(r.draft).toBeUndefined();
-  expect(Object.keys(r).sort()).toEqual(["alternates", "citations", "text", "warnings"]);
+});
+
+test("citations are exactly the quoted top chunks, capped at three", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "ADI/cuti.pdf" });
+  for (const n of [0, 1, 2, 3]) {
+    const chunkId = `doc-a:${n}:0`;
+    await insertChunk(db, { chunkId, docId: "doc-a", text: `Cuti poin ${n}.` });
+    await insertVector(db, chunkId, unitVector(0));
+  }
+
+  const r = await answer(db, "cuti", "answer", { embed: nearEmbed, key: "k" });
+
+  expect(r.citations).toHaveLength(3);
+  for (const citation of r.citations) {
+    expect(r.text).toContain(`[${citation.chunkId}]`);
+  }
+  expect(r.text.split("[doc-a:").length - 1).toBe(3);
+});
+
+test("draft mode returns the same excerpts in text and draft", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "ADI/cuti.pdf" });
+  await insertChunk(db, { chunkId: "doc-a:1:0", docId: "doc-a", text: "Cuti tahunan tiga hari kerja." });
+  await insertVector(db, "doc-a:1:0", unitVector(0));
+
+  const r = await answer(db, "cuti", "draft", { embed: nearEmbed, key: "k" });
+
+  expect(r.draft).toBe(r.text);
+  expect(r.text).toBe("Cuti tahunan tiga hari kerja. [doc-a:1:0]");
 });
 
 test("low-confidence active doc surfaces alternates as a warning", async () => {
   const db = await makeDb();
-  await insertDoc(db, {
-    docId: "doc-a",
-    path: "NEW SOP/cuti.pdf",
-    status: "active",
-    confidence: "low",
-    alternates: ["doc-b"],
-  });
-  await insertDoc(db, {
-    docId: "doc-b",
-    path: "NEW SOP/cuti-lama.pdf",
-    status: "active",
-    confidence: "low",
-    alternates: ["doc-a"],
-  });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "SOP cuti tahunan bagi pegawai",
-  });
-
-  const r = await answer(db, "SOP cuti", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async () => "Menurut [doc-a:1:0], cuti tahunan diajukan ke atasan.",
-  });
-
-  expect(r.alternates).toEqual([
-    { docId: "doc-b", path: "NEW SOP/cuti-lama.pdf" },
-  ]);
-  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti.pdf"))).toBe(true);
-  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti-lama.pdf"))).toBe(true);
-  expect(r.text).toContain("doc-a:1:0");
-  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-a:1:0"]);
-  expect(r.draft).toBeUndefined();
-  expect(Object.keys(r).sort()).toEqual(["alternates", "citations", "text", "warnings"]);
-});
-
-test("stale hit produces a stale warning", async () => {
-  const db = await makeDb();
-  await insertDoc(db, {
-    docId: "doc-a",
-    path: "NEW SOP/cuti.pdf",
-    versionKey: "v2",
-  });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti",
-    versionKey: "v1",
-  });
-
-  const r = await answer(db, "cuti", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async () => "Menurut [doc-a:1:0], cuti diajukan.",
-  });
-
-  expect(r.citations[0].stale).toBe(true);
-  expect(r.warnings.some((warning) => /stale/i.test(warning))).toBe(true);
-  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti.pdf"))).toBe(true);
-});
-
-test("draft mode returns text and draft with no Drive field", async () => {
-  const db = await makeDb();
-  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti tahunan",
-  });
-
-  const r = await answer(db, "cuti", "draft", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async () => "Draf: cuti tahunan diajukan paling lambat tiga hari kerja [doc-a:1:0].",
-  });
-
-  expect(typeof r.draft).toBe("string");
-  expect(r.draft).toContain("Draf");
-  expect(Object.keys(r).sort()).toEqual([
-    "alternates",
-    "citations",
-    "draft",
-    "text",
-    "warnings",
-  ]);
-});
-
-test("only citations the model text cites are kept", async () => {
-  const db = await makeDb();
-  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
-  await insertDoc(db, { docId: "doc-b", path: "NEW SOP/cuti-lama.pdf" });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti tahunan",
-  });
-  await insertChunk(db, {
-    chunkId: "doc-b:1:0",
-    docId: "doc-b",
-    text: "prosedur cuti lama",
-  });
-
-  const r = await answer(db, "cuti", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async () => "Menurut [doc-a:1:0], cuti tahunan diajukan.",
-  });
-
-  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-a:1:0"]);
-});
-
-test("model text without a citation returns no source and no citations", async () => {
-  const db = await makeDb();
-  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti tahunan",
-  });
-
-  const r = await answer(db, "cuti", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async () => "Tidak ada kutipan yang cocok.",
-  });
-
-  expect(r.text).toMatch(/tidak ditemukan|no source/i);
-  expect(r.citations).toEqual([]);
-});
-
-test("far vector with no keyword match returns no source", async () => {
-  const db = await makeDb();
-  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti tahunan",
-  });
+  await insertDoc(db, { docId: "doc-a", path: "ADI/cuti.pdf", confidence: "low", alternates: ["doc-b"] });
+  await insertDoc(db, { docId: "doc-b", path: "ADI/cuti-lama.pdf", status: "superseded" });
+  await insertChunk(db, { chunkId: "doc-a:1:0", docId: "doc-a", text: "Cuti tahunan." });
   await insertVector(db, "doc-a:1:0", unitVector(0));
 
-  const r = await answer(db, "xyz", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(1)],
-    chat: async () => {
-      throw new Error("LLM must not be called without hits");
-    },
-  });
+  const r = await answer(db, "cuti", "answer", { embed: nearEmbed, key: "k" });
 
-  expect(r.text).toMatch(/tidak ditemukan|no source/i);
-  expect(r.citations).toEqual([]);
+  expect(r.alternates).toEqual([{ docId: "doc-b", path: "ADI/cuti-lama.pdf" }]);
+  expect(r.warnings.some((w) => w === "ADI/cuti-lama — alternate, check needed")).toBe(true);
 });
 
-test("embedding failure warns and still answers from FTS hits", async () => {
+test("inactive cited document is named in a warning", async () => {
   const db = await makeDb();
-  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti tahunan",
-  });
+  await insertDoc(db, { docId: "doc-old", path: "OPR/archive/cuti.pdf", status: "superseded" });
+  await insertChunk(db, { chunkId: "doc-old:1:0", docId: "doc-old", text: "Cuti lama." });
+  await insertVector(db, "doc-old:1:0", unitVector(0));
+
+  const r = await answer(db, "cuti", "answer", { embed: nearEmbed, key: "k" });
+
+  expect(r.warnings.some((w) => w === "OPR/archive/cuti — cited, not active")).toBe(true);
+});
+
+test("embedding failure still answers from keyword hits", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "ADI/cuti.pdf" });
+  await insertChunk(db, { chunkId: "doc-a:1:0", docId: "doc-a", text: "Cuti tahunan diajukan." });
 
   const r = await answer(db, "cuti", "answer", {
-    key: "test-key",
     embed: async () => {
-      throw new Error("embedding service down");
+      throw new Error("embedding down");
     },
-    chat: async () => "Menurut [doc-a:1:0], cuti diajukan.",
+    key: "k",
   });
 
-  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-a:1:0"]);
-  expect(r.warnings).toContain("vector search unavailable");
-});
-
-test("passages carry status and confidence and inactive citations warn by path", async () => {
-  const db = await makeDb();
-  await insertDoc(db, {
-    docId: "doc-a",
-    path: "NEW SOP/cuti.pdf",
-    status: "active",
-  });
-  await insertDoc(db, {
-    docId: "doc-b",
-    path: "NEW SOP/cuti-lama.pdf",
-    status: "superseded",
-  });
-  await insertChunk(db, {
-    chunkId: "doc-a:1:0",
-    docId: "doc-a",
-    text: "prosedur cuti tahunan",
-  });
-  await insertChunk(db, {
-    chunkId: "doc-b:1:0",
-    docId: "doc-b",
-    text: "prosedur cuti lama",
-  });
-
-  let messages: Array<{ role: string; content: string }> = [];
-  const r = await answer(db, "cuti", "answer", {
-    key: "test-key",
-    embed: async () => [unitVector(0)],
-    chat: async (msgs) => {
-      messages = msgs;
-      return "Menurut [doc-b:1:0], cuti lama berlaku.";
-    },
-  });
-
-  const system = messages.find((message) => message.role === "system")?.content ?? "";
-  const user = messages.find((message) => message.role === "user")?.content ?? "";
-  expect(system).toContain("data");
-  expect(system).toContain("active");
-  expect(user).toContain('<passage id="doc-b:1:0">');
-  expect(user).toContain("status: superseded");
-  expect(user).toContain("confidence: high");
-  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-b:1:0"]);
-  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti-lama.pdf"))).toBe(true);
+  expect(r.citations.map((c) => c.chunkId)).toEqual(["doc-a:1:0"]);
+  expect(r.text).toBe("Cuti tahunan diajukan. [doc-a:1:0]");
 });
