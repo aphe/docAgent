@@ -27,6 +27,7 @@ export async function embedTexts(
   const embeddings: number[][] = [];
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
     const batch = texts.slice(i, i + BATCH_SIZE);
+    const started = Date.now();
     const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
       method: "POST",
       headers: {
@@ -66,6 +67,7 @@ export async function embedTexts(
       .map(({ item }) => item.embedding);
 
     embeddings.push(...ordered);
+    console.info(`[embed] model=${EMBEDDING_MODEL} batch=${batch.length} ms=${Date.now() - started}`);
   }
 
   return embeddings;
