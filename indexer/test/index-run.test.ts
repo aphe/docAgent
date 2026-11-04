@@ -321,7 +321,7 @@ test("rename keeps the doc id, deleted files prune rows, edits create versions",
     );
     expect(
       String(before.rows.find((row) => row.path === "a.pdf")?.topic_key),
-    ).toBe("");
+    ).toBe("a");
 
     await mkdir(join(dir, "nested"), { recursive: true });
     await rename(join(dir, "a.pdf"), join(dir, "nested", "c.pdf"));
@@ -339,7 +339,7 @@ test("rename keeps the doc id, deleted files prune rows, edits create versions",
     expect(afterMove.rows).toHaveLength(1);
     expect(afterMove.rows[0].path).toBe("nested/c.pdf");
     expect(String(afterMove.rows[0].doc_id)).toBe(idOfA);
-    expect(String(afterMove.rows[0].topic_key)).toBe("nested");
+    expect(String(afterMove.rows[0].topic_key)).toBe("c");
     expect(String(afterMove.rows[0].topic_key)).not.toBe("");
 
     const oldChunks = await db.execute(
@@ -401,7 +401,7 @@ test("lampiran stays unparsable across unchanged and moved runs", async () => {
     const rows = await db.execute("SELECT status, topic_key FROM documents");
     expect(rows.rows).toHaveLength(1);
     expect(String(rows.rows[0].status)).toBe("unparsable");
-    expect(String(rows.rows[0].topic_key)).toBe("");
+    expect(String(rows.rows[0].topic_key)).toBe("lampiran");
 
     const second = await runIndex({ root: dir, dryRun: false, deps });
     expect(second.added).toBe(0);
@@ -416,7 +416,7 @@ test("lampiran stays unparsable across unchanged and moved runs", async () => {
     expect(third.unparsable).toBe(1);
     const rows3 = await db.execute("SELECT status, topic_key FROM documents");
     expect(String(rows3.rows[0].status)).toBe("unparsable");
-    expect(String(rows3.rows[0].topic_key)).toBe("nested");
+    expect(String(rows3.rows[0].topic_key)).toBe("lampiran");
   } finally {
     db.close();
   }

@@ -151,7 +151,7 @@ test("added docs write rows, chunks, FTS and read_error", async () => {
           parsed: { pages: [], unreadable: true, reason: "no-text-layer" },
           dates: {
             docId: "d2",
-            topicKey: "sop",
+            topicKey: "a",
             raw: [],
             isLampiran: false,
           },
@@ -187,7 +187,7 @@ test("added docs write rows, chunks, FTS and read_error", async () => {
     expect(docs.rows).toHaveLength(1);
     expect(docs.rows[0].read_error).toBe("no-text-layer");
     expect(docs.rows[0].path).toBe("sop/a.pdf");
-    expect(docs.rows[0].topic_key).toBe("sop");
+    expect(docs.rows[0].topic_key).toBe("a");
     expect(docs.rows[0].is_duplicate).toBe(0);
 
     const chunks = await db.execute({

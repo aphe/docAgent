@@ -1,4 +1,3 @@
-import { dirname } from "node:path";
 import type { Client } from "@libsql/client";
 import type { Chunk } from "./chunk.js";
 import type { MatchPlan } from "./identity.js";
@@ -8,12 +7,14 @@ import type {
   DocSupersession,
   SupersessionResult,
 } from "./supersession.js";
+import { topicKeyFor } from "./topic-key.js";
 import type { VectorStore } from "./vector-store.js";
 
 const IN_CHUNK_SIZE = 400;
 
 export type ApplyPlan = {
   unchanged: MatchPlan["unchanged"];
+  unchangedTopicKeys: Map<string, string>;
   newVersion: Array<
     MatchPlan["newVersion"][number] & {
       docId: string;
@@ -53,11 +54,6 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 function placeholders(count: number): string {
   return Array.from({ length: count }, () => "?").join(", ");
-}
-
-function topicKeyFor(path: string): string {
-  const dir = dirname(path);
-  return dir === "." ? "" : dir;
 }
 
 function readErrorFor(parsed: ParsedDoc): string | null {
@@ -217,15 +213,20 @@ export async function applyRun(
   }
 
   for (const docId of plan.unchanged) {
+    const topicKey = plan.unchangedTopicKeys.get(docId);
+    if (topicKey === undefined) {
+      throw new Error(`no topic key for unchanged document ${docId}`);
+    }
     const status = supersession.byDoc[docId];
     if (status) {
       statements.push({
         sql: `UPDATE documents
-              SET last_seen_run = ?, status = ?, status_confidence = ?,
-                  alternate_candidates = ?
+              SET last_seen_run = ?, topic_key = ?, status = ?,
+                  status_confidence = ?, alternate_candidates = ?
               WHERE doc_id = ? AND root_id = ?`,
         args: [
           runId,
+          topicKey,
           status.status,
           status.statusConfidence,
           JSON.stringify(status.alternates),
@@ -235,8 +236,8 @@ export async function applyRun(
       });
     } else {
       statements.push({
-        sql: "UPDATE documents SET last_seen_run = ? WHERE doc_id = ? AND root_id = ?",
-        args: [runId, docId, rootId],
+        sql: "UPDATE documents SET last_seen_run = ?, topic_key = ? WHERE doc_id = ? AND root_id = ?",
+        args: [runId, topicKey, docId, rootId],
       });
     }
   }

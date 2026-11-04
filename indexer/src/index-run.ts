@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
-import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
 import type { Client } from "@libsql/client";
 import { type Chunk, chunkDoc } from "./chunk.js";
 import { rootId as computeRootId } from "./config.js";
@@ -8,6 +8,7 @@ import { extractDates } from "./dates.js";
 import { type DocRow, matchFiles, type ScannedFile } from "./identity.js";
 import type { ParsedDoc } from "./parse/index.js";
 import { type DocDates, deriveSupersession } from "./supersession.js";
+import { topicKeyFor } from "./topic-key.js";
 import type { VectorStore } from "./vector-store.js";
 import { type ApplyPlan, applyRun } from "./write.js";
 
@@ -25,6 +26,8 @@ export interface RunSummary {
   unparsable: number;
   noTextLayerPdfs: number;
   skippedNonPdf: number;
+  /** Files whose read failed; each carries the read_error reason. */
+  failures: Array<{ path: string; reason: string }>;
 }
 
 export interface ScanResult {
@@ -49,6 +52,7 @@ export interface IndexDeps {
 }
 
 interface StoredDocRow extends DocRow {
+  read_error: string | null;
   topic_key: string;
   document_number: string | null;
   issued_date: string | null;
@@ -104,11 +108,6 @@ export async function scanPdfFiles(root: string): Promise<ScanResult> {
   return { files, skippedNonPdf };
 }
 
-function topicKeyFor(relativePath: string): string {
-  const dir = dirname(relativePath);
-  return dir === "." ? "" : dir;
-}
-
 function stringOrNull(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
 }
@@ -119,7 +118,7 @@ async function readStoredRows(
 ): Promise<StoredDocRow[]> {
   const result = await db.execute({
     sql: `SELECT doc_id, root_id, path, topic_key, version_key, document_number,
-                 issued_date, effective_date, raw_date_strings, status
+                 issued_date, effective_date, raw_date_strings, status, read_error
           FROM documents
           WHERE root_id = ?`,
     args: [rootId],
@@ -136,6 +135,7 @@ async function readStoredRows(
     effective_date: stringOrNull(row.effective_date),
     raw_date_strings: stringOrNull(row.raw_date_strings),
     status: String(row.status),
+    read_error: stringOrNull(row.read_error),
   }));
 }
 
@@ -268,18 +268,20 @@ export async function runIndex(opts: {
   const chunksByDoc = new Map<string, Chunk[]>();
   const docDates: DocDates[] = [];
   let noTextLayerPdfs = 0;
+  const failures: Array<{ path: string; reason: string }> = [];
 
-  const record = (prepared: PreparedDoc): void => {
+  const record = (prepared: PreparedDoc, path: string): void => {
     docDates.push(prepared.dates);
     chunksByDoc.set(prepared.dates.docId, prepared.chunks);
     if (prepared.parsed.reason === "no-text-layer") noTextLayerPdfs++;
+    if (prepared.parsed.reason) failures.push({ path, reason: prepared.parsed.reason });
   };
 
   for (const entry of plan.added) {
     const docId = randomUUID();
     const prepared = await prepareDoc(deps, rootPath, docId, entry.file);
     added.push({ ...entry, docId, parsed: prepared.parsed, dates: prepared.dates });
-    record(prepared);
+    record(prepared, entry.file.path);
   }
 
   for (const entry of plan.newVersion) {
@@ -295,13 +297,18 @@ export async function runIndex(opts: {
       parsed: prepared.parsed,
       dates: prepared.dates,
     });
-    record(prepared);
+    record(prepared, entry.file.path);
   }
 
   const rowByDocId = new Map(stored.map((row) => [row.doc_id, row]));
+  const unchangedTopicKeys = new Map<string, string>();
   for (const docId of plan.unchanged) {
     const row = rowByDocId.get(docId);
-    if (row) docDates.push(storedDates(row, row.topic_key));
+    if (!row) continue;
+    const topicKey = topicKeyFor(row.path);
+    unchangedTopicKeys.set(docId, topicKey);
+    docDates.push(storedDates(row, topicKey));
+    if (row.read_error) failures.push({ path: row.path, reason: row.read_error });
   }
   for (const entry of plan.moved) {
     const row = rowByDocId.get(entry.docId);
@@ -326,6 +333,7 @@ export async function runIndex(opts: {
     unparsable,
     noTextLayerPdfs,
     skippedNonPdf: scan.skippedNonPdf,
+    failures,
   };
 
   if (dryRun) return summary;
@@ -333,7 +341,7 @@ export async function runIndex(opts: {
   await applyRun(
     deps.db,
     deps.store,
-    { unchanged: plan.unchanged, newVersion, moved: plan.moved, added, pruned: plan.pruned },
+    { unchanged: plan.unchanged, unchangedTopicKeys, newVersion, moved: plan.moved, added, pruned: plan.pruned },
     chunksByDoc,
     vectors,
     supersession,
