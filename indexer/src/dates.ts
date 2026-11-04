@@ -89,16 +89,55 @@ function isoFromMatch(match: RegExpExecArray): string | undefined {
 }
 
 /**
- * Returns the sentence-like text immediately before a date so the nearest
- * issued/effective label can be attached. Newlines are flattened because
- * Indonesian legal documents often wrap "pada tanggal" onto its own line.
+ * Bounds of the sentence containing a date, using periods, semicolons, and
+ * paragraph breaks as separators. Real PDF text often places the label in a
+ * different sentence from the date, so callers fall back to a wider window.
  */
-function labelContext(text: string, dateIndex: number): string {
-  const before = text
-    .slice(Math.max(0, dateIndex - 200), dateIndex)
-    .replace(/\s+/g, " ");
-  const boundary = Math.max(before.lastIndexOf(". "), before.lastIndexOf("; "));
-  return boundary >= 0 ? before.slice(boundary + 1) : before;
+const MAX_LABEL_DISTANCE = 400;
+const SENTENCE_BOUNDARIES = [". ", "; ", "\n\n", "\r\n\r\n"];
+
+function sentenceBounds(text: string, dateIndex: number): [number, number] {
+  const before = text.slice(0, dateIndex);
+  let start = 0;
+  for (const boundary of SENTENCE_BOUNDARIES) {
+    const pos = before.lastIndexOf(boundary);
+    if (pos + boundary.length > start) start = pos + boundary.length;
+  }
+  const after = text.slice(dateIndex);
+  let end = text.length;
+  for (const boundary of SENTENCE_BOUNDARIES) {
+    const pos = after.indexOf(boundary);
+    if (pos >= 0 && dateIndex + pos + boundary.length < end) {
+      end = dateIndex + pos + boundary.length;
+    }
+  }
+  return [start, end];
+}
+
+function nearestLabelIn(
+  text: string,
+  dateIndex: number,
+  searchStart: number,
+  searchEnd: number,
+): { kind: "issued" | "effective"; distance: number } | undefined {
+  let best: { kind: "issued" | "effective"; distance: number } | undefined;
+  const searchText = text.slice(searchStart, searchEnd);
+  for (const [kind, re] of [
+    ["issued", ISSUED_LABEL],
+    ["effective", EFFECTIVE_LABEL],
+  ] as const) {
+    const globalRe = new RegExp(re.source, "gi");
+    for (;;) {
+      const match = globalRe.exec(searchText);
+      if (match === null) break;
+      const matchIndex = searchStart + match.index;
+      const distance = Math.abs(matchIndex - dateIndex);
+      if (best === undefined || distance < best.distance) {
+        best = { kind, distance };
+      }
+    }
+  }
+  return best;
 }
 
 /**
@@ -107,6 +146,8 @@ function labelContext(text: string, dateIndex: number): string {
  * Only labeled dates populate `issued` or `effective`:
  * - `tanggal ditetapkan` (or a nearby `ditetapkan`) -> issued
  * - `tanggal diundangkan`, `diundangkan`, or `mulai berlaku` -> effective
+ *
+ * A label may appear before or after the date in the extracted text order.
  *
  * Every recognized date is returned in `raw` in document order. A `LAMPIRAN`
  * heading sets `isLampiran`; callers treat an annex as unparsable regardless
@@ -126,15 +167,19 @@ export function extractDates(text: string): ExtractedDates {
     if (iso === undefined) continue;
     raw.push(match[0].trim());
 
-    const context = labelContext(text, match.index);
-    const issuedIndex = context.search(ISSUED_LABEL);
-    const effectiveIndex = context.search(EFFECTIVE_LABEL);
-    if (issuedIndex < 0 && effectiveIndex < 0) continue;
+    const [sentenceStart, sentenceEnd] = sentenceBounds(text, match.index);
+    let label = nearestLabelIn(text, match.index, sentenceStart, sentenceEnd);
+    if (label === undefined) {
+      const windowStart = Math.max(0, match.index - MAX_LABEL_DISTANCE);
+      const windowEnd = Math.min(text.length, match.index + MAX_LABEL_DISTANCE);
+      label = nearestLabelIn(text, match.index, windowStart, windowEnd);
+    }
+    if (label === undefined) continue;
 
-    if (effectiveIndex > issuedIndex) {
-      effective ??= iso;
-    } else if (issuedIndex > effectiveIndex) {
+    if (label.kind === "issued") {
       issued ??= iso;
+    } else {
+      effective ??= iso;
     }
   }
 

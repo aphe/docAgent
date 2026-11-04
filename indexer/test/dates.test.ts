@@ -93,4 +93,36 @@ describe("extractDates", () => {
     expect(result.issued).toBe("2024-01-01");
     expect(result.raw).toEqual(["1 Januari 2024", "2 Januari 2024"]);
   });
+
+  test("binds a label that follows the date across newlines and multi-space", () => {
+    const text = "24 Juni 2009\n\nDitetapkan di Jakarta\npada tanggal   24 Juni 2009";
+    const result = extractDates(text);
+    expect(result.issued).toBe("2009-06-24");
+    expect(result.raw).toEqual(["24 Juni 2009", "24 Juni 2009"]);
+  });
+
+  test("binds a label that precedes the date across newlines and multi-space", () => {
+    const text = "Ditetapkan di Jakarta\npada tanggal   24 Juni 2009";
+    const result = extractDates(text);
+    expect(result.issued).toBe("2009-06-24");
+    expect(result.raw).toEqual(["24 Juni 2009"]);
+  });
+
+  test("binds a label in a previous sentence", () => {
+    const text = "Ditetapkan di Jakarta. Pada tanggal 24 Juni 2009.";
+    const result = extractDates(text);
+    expect(result.issued).toBe("2009-06-24");
+  });
+
+  test("binds a label in a following sentence", () => {
+    const text = "24 Juni 2009. Ditetapkan di Jakarta.";
+    const result = extractDates(text);
+    expect(result.issued).toBe("2009-06-24");
+  });
+
+  test("binds an effective label that follows the date", () => {
+    const text = "20 Januari 2024\n\nDiundangkan di Jakarta";
+    const result = extractDates(text);
+    expect(result.effective).toBe("2024-01-20");
+  });
 });
