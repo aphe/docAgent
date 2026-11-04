@@ -156,3 +156,7 @@ dist
 
 # M1 extras
 .wrangler
+
+# Local document corpus (M1 root). Contents are not tracked.
+docs/*
+!docs/superpowers/

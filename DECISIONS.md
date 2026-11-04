@@ -10,7 +10,7 @@ Status: draft, living note. Append as answers arrive. Not code.
 
 ## Status
 - User approved (this session): M1 scope = local files only (decision 18); supersession derived from dates with no LLM pass or confirmation step (decision 5). Conflict detection deferred.
-- Still open before building: local corpus root path and the corpus measurement (Next steps 1). OCR and `.docx`/`.doc` are out of M1 (decision 19).
+- Local corpus root: `docs/` in the repo (user choice). Contents git-ignored; `docs/superpowers/` stays tracked. Still open: test questions and success bar (Next steps 3). Non-PDF and no-text-layer shares: Task 1 measurement, not yet run. OCR and `.docx`/`.doc` are out of M1 (decision 19).
 - Plan written: `docs/superpowers/plans/2026-11-03-docs-agent-m1.md` (12 tasks; Task 1 = corpus measurement, needs the root path). Awaiting user choice of execution approach.
 - Renames and moves within a root: user asked for content-hash tracking; adopted. `doc_id` is a stored UUID; renames match by version key (decision 18). Not yet confirmed as final by the user.
 
