@@ -72,7 +72,7 @@ Fixed character windows inside each page. No chunk crosses a page boundary. `chu
 
 ## 8. Dates and supersession
 
-Dates are extracted with Indonesian patterns (`tanggal ditetapkan` → issued; `tanggal diundangkan` / `mulai berlaku` → effective; month names in Indonesian). No LLM pass.
+Dates are extracted with Indonesian patterns (`tanggal ditetapkan` → issued; `tanggal diundangkan` / `mulai berlaku` → effective; month names in Indonesian). No LLM pass. If no labeled issued date is found, the 8-digit `YYYYMMDD` filename prefix is used as the issued date (user ruling, 2026-11-03).
 
 Grouping: by `topic_key`. Ranking key: `effective_date`, falling back to `issued_date`.
 

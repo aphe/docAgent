@@ -125,4 +125,41 @@ describe("extractDates", () => {
     const result = extractDates(text);
     expect(result.effective).toBe("2024-01-20");
   });
+
+  test("falls back to filename date when no labeled issued date", () => {
+    const result = extractDates(
+      "Tidak ada label tanggal di sini.",
+      "20220124-RKI-P-ADI-017-SOP Pengawasan Internal.pdf",
+    );
+    expect(result.issued).toBe("2022-01-24");
+    expect(result.issuedSource).toBe("filename");
+    expect(result.raw).toEqual([]);
+  });
+
+  test("labeled issued date wins over filename date", () => {
+    const result = extractDates(
+      "Ditetapkan pada tanggal 15 Januari 2024.",
+      "20220124-RKI-P-ADI-017-SOP Pengawasan Internal.pdf",
+    );
+    expect(result.issued).toBe("2024-01-15");
+    expect(result.issuedSource).toBe("label");
+  });
+
+  test("invalid filename date is ignored", () => {
+    const result = extractDates(
+      "Tidak ada label tanggal di sini.",
+      "20261399-RKI-P-ADI-017-SOP Pengawasan Internal.pdf",
+    );
+    expect(result.issued).toBeUndefined();
+    expect(result.issuedSource).toBeUndefined();
+  });
+
+  test("non-prefixed filename is ignored", () => {
+    const result = extractDates(
+      "Tidak ada label tanggal di sini.",
+      "SOP Pengawasan Internal.pdf",
+    );
+    expect(result.issued).toBeUndefined();
+    expect(result.issuedSource).toBeUndefined();
+  });
 });

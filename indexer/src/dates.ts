@@ -3,6 +3,7 @@ export interface ExtractedDates {
   effective?: string;
   raw: string[];
   isLampiran: boolean;
+  issuedSource?: "label" | "filename";
 }
 
 /**
@@ -69,6 +70,16 @@ function toIso(
   const m = String(month).padStart(2, "0");
   const d = String(day).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * Extracts an issued date from an eight-digit YYYYMMDD basename prefix. The
+ * prefix must be exactly eight leading digits and a real calendar date.
+ */
+function filenameDate(basename: string): string | undefined {
+  const match = /^(\d{4})(\d{2})(\d{2})(?!\d)/.exec(basename);
+  if (match === null) return undefined;
+  return toIso(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 function isoFromMatch(match: RegExpExecArray): string | undefined {
@@ -154,10 +165,14 @@ function nearestLabelIn(
  * of any date it carries. The first date of each labeled kind wins when more
  * than one appears.
  */
-export function extractDates(text: string): ExtractedDates {
+export function extractDates(
+  text: string,
+  basename?: string,
+): ExtractedDates {
   const raw: string[] = [];
   let issued: string | undefined;
   let effective: string | undefined;
+  let issuedSource: "label" | "filename" | undefined;
 
   const dateRe = new RegExp(DATE_PATTERN, "gi");
   for (;;) {
@@ -183,9 +198,20 @@ export function extractDates(text: string): ExtractedDates {
     }
   }
 
+  if (issued !== undefined) {
+    issuedSource = "label";
+  } else if (basename !== undefined) {
+    const fromFilename = filenameDate(basename);
+    if (fromFilename !== undefined) {
+      issued = fromFilename;
+      issuedSource = "filename";
+    }
+  }
+
   return {
     ...(issued === undefined ? {} : { issued }),
     ...(effective === undefined ? {} : { effective }),
+    ...(issuedSource === undefined ? {} : { issuedSource }),
     raw,
     isLampiran: LAMPIRAN_HEADING.test(text),
   };

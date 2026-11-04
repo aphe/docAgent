@@ -46,6 +46,7 @@ Status: draft, living note. Append as answers arrive. Not code.
 - Each document row stores `sha256(file bytes)` as a column, and gets a nullable `drive_file_id` column (empty in M1). Iteration 2 matches existing rows to Drive files by content hash and fills `drive_file_id` instead of re-ingesting, so `doc_id` stays the same and nothing is double-ingested.
 - Iteration 2 swaps the source adapter; the chunk schema, D1 keys, and citation shape stay the same.
 19. **Stack and scope re-sync (user, 2026-11-03).** One VoltAgent app (`@voltagent/core`, `@voltagent/server-hono`, `@voltagent/libsql`) on one libsql file `data/docs-agent.db`: chunks, FTS5, native vectors (`F32_BLOB(1536)`, `vector_top_k`, cosine), and edges. No Cloudflare, D1, Vectorize, or Wrangler. M1 indexes PDF only. No OCR. `.docx`, `.doc`, and native Google Docs are out of M1. A PDF page with no text layer gets `read_error = no-text-layer` and is not indexed as empty. Supersedes decisions 1, 3, 8, 9, 11, 12, 14, 16 where they name Cloudflare, D1, Vectorize, OCR, or non-PDF parsers.
+20. **Ruling: issued-date fallback from filename prefix.** Labeled corpus dates absent — user chose this option.
 
 ## Provisional (non-binding, proxy until real questions exist)
 - **Answer and ingest-pass LLM: GPT-6 Luna via OpenRouter** (`openai/gpt-6-luna`, $0.10 in / $0.50 out per 1M tokens). Confirmed by user. Not yet validated on your questions.
