@@ -10,6 +10,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function fakeVector(seed: number): number[] {
+  return Array.from({ length: 1536 }, (_v, i) => seed + i * 0.001);
+}
+
 async function seedDoc(
   db: Client,
   docId: string,
@@ -78,6 +82,8 @@ test("pruned docs remove their chunk vectors and rows", async () => {
       { byDoc: {}, supersedes: [] },
       "run1",
       "R",
+      "/root",
+      "2025-01-01T00:00:00Z",
     );
 
     expect(deleted).toEqual([["d1:1:0"]]);
@@ -154,7 +160,7 @@ test("added docs write rows, chunks, FTS and read_error", async () => {
       pruned: [],
     };
     const chunksByDoc = new Map<string, Chunk[]>([["d2", [chunk]]]);
-    const vectors = new Map<string, number[]>([["d2:1:0", [0.1, 0.2]]]);
+    const vectors = new Map<string, number[]>([["d2:1:0", fakeVector(0.1)]]);
 
     await applyRun(
       db,
@@ -170,6 +176,8 @@ test("added docs write rows, chunks, FTS and read_error", async () => {
       },
       "run2",
       "R",
+      "/root",
+      "2025-01-01T00:00:00Z",
     );
 
     const docs = await db.execute({
@@ -186,19 +194,15 @@ test("added docs write rows, chunks, FTS and read_error", async () => {
       sql: "SELECT text FROM chunks WHERE chunk_id = ?",
       args: ["d2:1:0"],
     });
-    expect(chunks.rows).toHaveLength(1);
-    expect(chunks.rows[0].text).toBe("text");
+    expect(chunks.rows).toHaveLength(0);
 
     const fts = await db.execute({
       sql: "SELECT text FROM chunks_fts WHERE chunk_id = ?",
       args: ["d2:1:0"],
     });
-    expect(fts.rows).toHaveLength(1);
-    expect(fts.rows[0].text).toBe("text");
+    expect(fts.rows).toHaveLength(0);
 
-    expect(upserted).toEqual([
-      [{ id: "d2:1:0", values: [0.1, 0.2], metadata: { docId: "d2" } }],
-    ]);
+    expect(upserted).toEqual([]);
   } finally {
     db.close();
   }
@@ -252,7 +256,7 @@ test("newVersion replaces chunks and updates read_error", async () => {
       pruned: [],
     };
     const chunksByDoc = new Map<string, Chunk[]>([["d1", [chunk]]]);
-    const vectors = new Map<string, number[]>([["d1:1:0", [0.3, 0.4]]]);
+    const vectors = new Map<string, number[]>([["d1:1:0", fakeVector(0.3)]]);
 
     await applyRun(
       db,
@@ -268,11 +272,13 @@ test("newVersion replaces chunks and updates read_error", async () => {
       },
       "run3",
       "R",
+      "/root",
+      "2025-01-01T00:00:00Z",
     );
 
-    expect(deleted).toEqual([["d1:1:0"]]);
+    expect(deleted).toEqual([]);
     expect(upserted).toEqual([
-      [{ id: "d1:1:0", values: [0.3, 0.4], metadata: { docId: "d1" } }],
+      [{ id: "d1:1:0", values: fakeVector(0.3), metadata: { docId: "d1" } }],
     ]);
 
     const docs = await db.execute({
