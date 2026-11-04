@@ -127,7 +127,7 @@ git commit -m "feat: corpus measurement CLI"
 
 **Interfaces:**
 - Consumes: root path from Task 1 CLI
-  - Produces: `rootId(absRoot: string): string` (sha256 of absolute path, hex); `loadConfig(argv: string[], env: NodeJS.ProcessEnv): { root: string; rootId: string; openrouterKey: string; dbPath: string; ocrMinChars: number }` (`dbPath` default `data/docs-agent.db`; `ocrMinChars` default 20; overridable via env)
+  - Produces: `rootId(absRoot: string): string` (sha256 of absolute path, hex); `loadConfig(argv: string[], env: NodeJS.ProcessEnv): { root: string; rootId: string; openrouterKey: string; dbPath: string; minTextChars: number }` (`dbPath` default `data/docs-agent.db`; `minTextChars` default 20, the Task 1 no-text-layer threshold; overridable via env)
 
 libsql tables (exact columns, created by `openDb` with `CREATE TABLE IF NOT EXISTS`):
 - `documents(doc_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, path TEXT NOT NULL, topic_key TEXT NOT NULL, version_key TEXT NOT NULL, sha256 TEXT NOT NULL, drive_file_id TEXT, document_number TEXT, issued_date TEXT, effective_date TEXT, raw_date_strings TEXT, status TEXT NOT NULL, status_confidence TEXT NOT NULL, alternate_candidates TEXT, is_duplicate INTEGER NOT NULL DEFAULT 0, read_error TEXT, last_seen_run TEXT NOT NULL)`
@@ -491,7 +491,7 @@ git commit -m "feat: embedding, vector store adapter, and run writes"
 
 **Interfaces:**
 - Consumes: Tasks 1–7
-- Produces: `runIndex(opts: { root: string; dryRun: boolean; deps: IndexDeps }): Promise<RunSummary>`; `RunSummary = { runId: string; added: number; newVersion: number; moved: number; pruned: number; duplicates: number; unparsable: number; ocrPages: number }`
+- Produces: `runIndex(opts: { root: string; dryRun: boolean; deps: IndexDeps }): Promise<RunSummary>`; `RunSummary = { runId: string; added: number; newVersion: number; moved: number; pruned: number; duplicates: number; unparsable: number; noTextLayerPdfs: number }`
 
 - [ ] **Step 1: Write the failing test**
 
