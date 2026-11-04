@@ -1,6 +1,6 @@
 # docsAgent M1 Design Spec
 
-**Status:** Draft. Awaiting user approval. No build until approved and the corpus is measured.
+**Status:** Approved by user (2026-11-03). Stack re-synced to VoltAgent + libsql. Build may proceed once the corpus is measured (section 11).
 **Source decisions:** `DECISIONS.md` (decisions 1–18). This spec restates them as design; where they conflict, `DECISIONS.md` wins until this spec is approved, then this spec supersedes it.
 
 ## 1. Purpose
@@ -11,7 +11,7 @@ Answer questions about SOP and agreement documents with citations from a local d
 
 In M1:
 - Local files only, under one configurable root folder.
-- Formats: `.docx`, `.pdf` (digital and scanned), `.doc` (converted via LibreOffice).
+- Formats: `.pdf` with a text layer only. Other extensions are skipped and counted in the corpus measurement. No OCR, no `.docx`, no `.doc` in M1.
 - Search: meaning-based (vectors) with keyword fallback (FTS5) for exact names and numbers.
 - Answers with citations to document, page, and character range.
 - Supersession derived from dates, with ambiguity shown.
@@ -26,10 +26,10 @@ Out of scope in M1:
 
 ## 3. Architecture
 
-Two components sharing a D1 database and a Vectorize index.
+One Node/TypeScript VoltAgent app on one local libsql database file, `data/docs-agent.db`. No Cloudflare, D1, Vectorize, or Wrangler.
 
-- **Indexer** (local Node process, `indexer/`): scans the root, parses, OCRs scanned pages locally, chunks, extracts dates, derives supersession, embeds, and writes D1 and Vectorize.
-- **Worker API** (Cloudflare Worker, `worker/`): hybrid search and LLM answer or draft.
+- **Indexer** (CLI, `indexer/`): scans the root, parses PDFs, chunks, extracts dates, derives supersession, embeds, and writes the libsql tables.
+- **Query API** (VoltAgent `honoServer`, `src/`): hybrid search and LLM answer or draft. Mounted route `POST /query`.
 
 Models via OpenRouter, OpenAI provider pinned, no fallback:
 - Embedding: `openai/text-embedding-3-small`, 1536 dimensions.
@@ -37,14 +37,14 @@ Models via OpenRouter, OpenAI provider pinned, no fallback:
 
 ## 4. Data model
 
-D1 tables:
-- `documents`: `doc_id` (UUID, stored), `root_id`, `path` (relative to root), `topic_key` (parent directory, relative), `version_key` (sha256 of bytes), `sha256`, `drive_file_id` (nullable, for iteration 2), `document_number`, `issued_date`, `effective_date`, `raw_date_strings`, `status` (`active` | `superseded` | `unparsable`; date-derived only), `status_confidence` (`high` | `low`), `alternate_candidates`, `is_duplicate`, `read_error` (nullable: `copy-restricted` | `ocr-failed` | `parse-failed`; extraction-derived only), `last_seen_run`.
+libsql tables (one database file, `data/docs-agent.db`):
+- `documents`: `doc_id` (UUID, stored), `root_id`, `path` (relative to root), `topic_key` (parent directory, relative), `version_key` (sha256 of bytes), `sha256`, `drive_file_id` (nullable, for iteration 2), `document_number`, `issued_date`, `effective_date`, `raw_date_strings`, `status` (`active` | `superseded` | `unparsable`; date-derived only), `status_confidence` (`high` | `low`), `alternate_candidates`, `is_duplicate`, `read_error` (nullable: `copy-restricted` | `no-text-layer` | `parse-failed`; extraction-derived only), `last_seen_run`.
 - `chunks`: `chunk_id` (`doc_id:page:idx`), `doc_id`, `page`, `idx`, `char_start`, `char_end`, `text`, `version_key`.
 - `chunks_fts`: FTS5 over `chunks.text`.
 - `supersedes`: `doc_id`, `supersedes_doc_id`.
 - `ingest_log`: `run_id`, `root_id`, `root_path`, `started_at`, `finished_at`.
 
-Vectorize: one vector per chunk, id = `chunk_id`, metadata `doc_id`. Index `docs-agent-chunks`, 1536 dimensions, cosine. Not the existing `recon-learned-cases` index.
+Vectors: a `chunk_vectors` table with `chunk_id` and `embedding F32_BLOB(1536)`, indexed with libsql `libsql_vector_idx` (cosine). Search uses `vector_top_k`. Not the existing `recon-learned-cases` index; no external vector service.
 
 ## 5. Identity and re-run behavior
 
@@ -55,20 +55,16 @@ Vectorize: one vector per chunk, id = `chunk_id`, metadata `doc_id`. Index `docs
   2. No path match: a row not seen this run with the same version key → moved or renamed. Update `path` and `topic_key`, keep `doc_id`.
   3. Otherwise: new document.
 - Two files with identical bytes in one run: the second is ingested as new and flagged `is_duplicate`.
-- A new version replaces its chunks by upsert on `chunk_id`. Chunks no longer produced are deleted from D1 and Vectorize.
+- A new version replaces its chunks by upsert on `chunk_id`. Chunks no longer produced are deleted from `chunks`, `chunk_vectors`, and `chunks_fts`.
 - Moving the whole root is a new `root_id`. Its rows are not matched to the old root.
 
-## 6. Parsing and OCR
+## 6. Parsing
 
-- `.docx`: `mammoth` raw text, one page.
-- `.pdf`: `pdfjs-dist` per page. A page with fewer non-whitespace characters than `ocrMinChars` goes to OCR.
-- OCR: `tesseract.js` with `ind+eng`, traineddata vendored locally. Page images are rendered in memory and never saved. Language data is never fetched over the network.
-- `.doc`: LibreOffice headless converts to a temp `.docx`, outside the source folder.
+- `.pdf`: `pdfjs-dist` text per page. Parsing is local and makes no network calls.
+- A page with no extractable text (no text layer) is flagged `read_error = no-text-layer`. It is not OCR'd and not indexed as empty.
 - Signed PDFs: read text only; never re-save the original.
 - Copy-restricted PDFs: `read_error = copy-restricted`, no chunks. Not worked around. `status` is still derived from dates; an unreadable document is not given a status it can't justify.
-- OCR failure or empty result: the page is flagged, not indexed as empty.
-
-The OCR tool choice (`tesseract.js` vs CLI) is confirmed only by the corpus measurement (section 11).
+- Non-PDF files are not parsed. They are counted in the corpus measurement and excluded from the index.
 
 ## 7. Chunking
 
@@ -105,27 +101,27 @@ Behavior:
 - A citation whose `doc_id` version changed since indexing → `stale = true` and a warning.
 - `mode: "draft"` → `draft` contains the revised text. Nothing is written to disk or Drive.
 
-Search: vector top-K from Vectorize merged with FTS5 top-K by reciprocal rank fusion.
+Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) merged with FTS5 top-K by reciprocal rank fusion.
 
 ## 10. Acceptance criteria
 
 1. Indexing a root twice with no changes: second run reports zero added, zero new versions, zero pruned.
 2. Renaming a file within the root keeps its `doc_id`; its `path` and `topic_key` update.
-3. Editing a file at the same path creates a new version; the old version's chunks are gone from D1 and Vectorize.
+3. Editing a file at the same path creates a new version; the old version's chunks are gone from `chunks`, `chunk_vectors`, and `chunks_fts`.
 4. Two identical files in one run: both ingested; the second is flagged `is_duplicate = 1`.
 5. A lampiran and an undated document are `unparsable`, not `active`.
 6. Two documents with the same latest effective date are both `low` with alternates.
 7. A copy-restricted PDF has `read_error = copy-restricted` and produces no chunks.
 8. A query with no match returns no citations and says no source was found.
 9. Changing the root path does not prune rows of another `root_id`.
-10. OCR makes no network calls.
+10. Indexing reads files locally. Only embedding requests leave the machine.
 11. Recall@5 and citation accuracy on the user's test questions meet the success bar (section 12).
 
 ## 11. Open items (must be resolved before build)
 
 1. Local root path. Needed for corpus measurement.
-2. Corpus measurement: file count, extension mix, scanned-PDF share, `.doc` count, estimated OCR minutes. Result recorded here.
-3. OCR choice (`tesseract.js` vs CLI) decided from section 2 measurement.
+2. Corpus measurement: file count, `.pdf` count, non-PDF count by extension, PDFs with no text layer. Result recorded here.
+3. (Resolved: no OCR in M1.)
 4. Test questions with expected documents: 10–20, supplied by the user.
 5. Success bar for recall@5 and citation accuracy.
 6. Confirm the rename and move default (section 5).

@@ -2,29 +2,30 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A local indexer and Cloudflare Worker that answer SOP and agreement questions from a configurable local folder, with citations, date-derived supersession (with ambiguity shown), and text-only drafts.
+**Goal:** A local indexer and a VoltAgent API that answer SOP and agreement questions from a configurable local folder, with citations, date-derived supersession (with ambiguity shown), and text-only drafts. One Node app, one libsql database file.
 
-**Architecture:** TypeScript on both sides. A local indexer reads a root folder, extracts and OCRs text, chunks, embeds via OpenRouter, derives supersession from dates, and writes D1 rows and Vectorize vectors. A Workers API runs hybrid search (Vectorize + D1 FTS5) and calls GPT-6 Luna via OpenRouter to answer with citations or draft a revision. No Drive access, no write-back.
+**Architecture:** TypeScript, one VoltAgent app. A local indexer reads a root folder, extracts text from `.pdf` files (text layer only; no OCR), chunks, embeds via OpenRouter, derives supersession from dates, and writes rows and vectors to `data/docs-agent.db` (libsql). The VoltAgent server runs hybrid search (libsql `vector_top_k` + FTS5) and calls GPT-6 Luna via OpenRouter to answer with citations or draft a revision. No Drive access, no write-back.
 
-**Tech Stack:** TypeScript, Cloudflare Workers, D1, Vectorize, `mammoth`, `pdfjs-dist`, LibreOffice (headless, for `.doc`), `tesseract.js` (`ind` + `eng`, vendored; choice pending Task 1 measurement, spec §11.3), OpenRouter (`openai/text-embedding-3-small`, `openai/gpt-6-luna`, OpenAI provider pinned, no fallback), Vitest.
+**Tech Stack:** TypeScript, VoltAgent (`@voltagent/core`, `@voltagent/server-hono`, `@voltagent/libsql`), libsql (tables, FTS5, native vectors), `pdfjs-dist`, OpenRouter (`openai/text-embedding-3-small`, `openai/gpt-6-luna`, OpenAI provider pinned, no fallback), Vitest, pnpm.
 
 **Spec:** `docs/superpowers/specs/2026-11-03-docs-agent-m1-design.md` (M1 design spec; `DECISIONS.md` is its provenance). The plan argues from the spec; executors read both.
 
 ## Global Constraints
 
 - Root folder is a required input (CLI argument or config value). No hardcoded path.
-- Embedding: `openai/text-embedding-3-small`, 1536 dims, new Vectorize index (not `recon-learned-cases`).
+- Embedding: `openai/text-embedding-3-small`, 1536 dims, stored in libsql `chunk_vectors` (`F32_BLOB(1536)`, `libsql_vector_idx`, cosine). No external vector service.
 - Answer and ingest LLM: `openai/gpt-6-luna`, OpenAI provider pinned, no fallback.
-- Read-only: the Worker never writes to Drive. Drafts are returned in the API response only.
+- Read-only: the API never writes to Drive. Drafts are returned in the API response only.
+- M1 indexes `.pdf` only. Other extensions are skipped and counted in the corpus measurement. No OCR, no `.docx`, no `.doc`.
 - Signed PDFs: extract text, never re-save. Permission-restricted PDFs: parser sets `unreadable = true`, `reason = "copy-restricted"`, no chunks, not worked around.
-- OCR runs locally; page images never leave the machine.
+- Indexing reads files locally. The only network calls are embedding requests to OpenRouter.
 - No auth in M1.
 
 ## Review Focus
 
-1. Re-run identity (spec §5, AC 1–3, 9): unchanged re-run is a no-op; rename or move keeps `doc_id`; edit at same path replaces chunks in D1 and Vectorize; another `root_id`'s rows are never pruned.
+1. Re-run identity (spec §5, AC 1–3, 9): unchanged re-run is a no-op; rename or move keeps `doc_id`; edit at same path replaces chunks in `chunks`, `chunk_vectors`, and `chunks_fts`; another `root_id`'s rows are never pruned.
 2. Date supersession (spec §8, AC 5–6): lampiran and undated docs are `unparsable`, never defaulted to newest; ties are `low` with alternates.
-3. Extraction failures (spec §6, AC 7): copy-restricted PDF gets `read_error = copy-restricted` in D1 (mapped in Task 7), zero chunks; OCR failure or empty page is flagged, not indexed as empty; OCR makes no network calls (AC 10).
+3. Extraction failures (spec §6, AC 7): copy-restricted PDF gets `read_error = copy-restricted` (mapped in Task 7), zero chunks; a PDF page with no text layer gets `read_error = no-text-layer`, not indexed as empty; no network calls during parsing (AC 10).
 4. Duplicates (spec §5): two identical files in one run → both ingested; the second is flagged `is_duplicate = 1`.
 5. Query contract (spec §9, AC 8): no match → no citation, says no source found; stale citation carries `stale = true` and a warning.
 
@@ -33,8 +34,8 @@
 ### Task 0: Repository setup
 
 **Files:**
-- Create or modify: `package.json`, `tsconfig.json`; Modify: `.gitignore` (append `.DS_Store`, `node_modules`, `.wrangler`, `.idea/`; the file already exists)
-- Create: `indexer/`, `worker/`, `eval/` directories
+- Create or modify: `package.json`, `tsconfig.json` (already present from the VoltAgent bootstrap, pnpm); Modify: `.gitignore` (append `.DS_Store`, `.voltagent`, `data/`, `.idea/`; the file already exists)
+- Create: `indexer/`, `eval/` directories. The VoltAgent app stays in `src/`.
 
 **Interfaces:**
 - Consumes: nothing
@@ -42,7 +43,7 @@
 
 - [ ] **Step 1: Initialize git and install the toolchain**
 
-Run: `git init && npm init -y && npm i -D typescript vitest tsx`
+Run: `pnpm install && pnpm add -D vitest tsx` (the repo already has pnpm, TypeScript, and the VoltAgent deps; do not use npm).
 Expected: `.git/` exists; `package.json` lists `typescript`, `vitest`, `tsx`.
 
 - [ ] **Step 2: Add ignores and commit the spec**
@@ -50,7 +51,7 @@ Expected: `.git/` exists; `package.json` lists `typescript`, `vitest`, `tsx`.
 ```bash
 # append only; keep existing entries
 grep -qxF ".DS_Store" .gitignore || echo ".DS_Store" >> .gitignore
-for p in node_modules .wrangler .idea/; do grep -qxF "$p" .gitignore || echo "$p" >> .gitignore; done
+for p in node_modules .voltagent data/ .idea/; do grep -qxF "$p" .gitignore || echo "$p" >> .gitignore; done
 git add .gitignore package.json DECISIONS.md
 git commit -m "chore: repo scaffold and spec"
 ```
@@ -64,7 +65,7 @@ Expected: one commit on the default branch.
 - Create: `indexer/src/measure.ts`
 - Create: `indexer/src/cli.ts`
 - Test: `indexer/test/measure.test.ts`
-- Test fixtures: `indexer/test/fixtures/corpus/` (small docx, digital PDF, scanned PDF, `.doc`)
+- Test fixtures: `indexer/test/fixtures/corpus/` (digital PDF, PDF with no text layer, copy-restricted PDF, one `.docx` used only to confirm it is skipped).
 
 **Interfaces:**
 - Consumes: nothing
@@ -117,21 +118,22 @@ git commit -m "feat: corpus measurement CLI"
 
 ---
 
-### Task 2: Config, root_id, and D1 schema
+### Task 2: Config, root_id, and libsql schema
 
 **Files:**
 - Create: `indexer/src/config.ts`
-- Create: `worker/migrations/0001_init.sql`
+- Create: `indexer/src/db.ts` (opens libsql client, runs the schema idempotently)
 - Test: `indexer/test/config.test.ts`
 
 **Interfaces:**
 - Consumes: root path from Task 1 CLI
-- Produces: `rootId(absRoot: string): string` (sha256 of absolute path, hex); `loadConfig(argv: string[], env: NodeJS.ProcessEnv): { root: string; rootId: string; openrouterKey: string; vectorizeIndex: "docs-agent-chunks"; ocrMinChars: number }` (`ocrMinChars` default 20; overridable via env)
+  - Produces: `rootId(absRoot: string): string` (sha256 of absolute path, hex); `loadConfig(argv: string[], env: NodeJS.ProcessEnv): { root: string; rootId: string; openrouterKey: string; dbPath: string; ocrMinChars: number }` (`dbPath` default `data/docs-agent.db`; `ocrMinChars` default 20; overridable via env)
 
-D1 tables (exact columns):
+libsql tables (exact columns, created by `openDb` with `CREATE TABLE IF NOT EXISTS`):
 - `documents(doc_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, path TEXT NOT NULL, topic_key TEXT NOT NULL, version_key TEXT NOT NULL, sha256 TEXT NOT NULL, drive_file_id TEXT, document_number TEXT, issued_date TEXT, effective_date TEXT, raw_date_strings TEXT, status TEXT NOT NULL, status_confidence TEXT NOT NULL, alternate_candidates TEXT, is_duplicate INTEGER NOT NULL DEFAULT 0, read_error TEXT, last_seen_run TEXT NOT NULL)`
 - `chunks(chunk_id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, page INTEGER NOT NULL, idx INTEGER NOT NULL, char_start INTEGER NOT NULL, char_end INTEGER NOT NULL, text TEXT NOT NULL, version_key TEXT NOT NULL)`
 - `chunks_fts` FTS5 over `chunks.text`
+- `chunk_vectors(chunk_id TEXT PRIMARY KEY, embedding F32_BLOB(1536) NOT NULL)` with `CREATE INDEX IF NOT EXISTS chunk_vectors_idx ON chunk_vectors(libsql_vector_idx(embedding, 'metric=cosine'))`
 - `supersedes(doc_id TEXT NOT NULL, supersedes_doc_id TEXT NOT NULL, PRIMARY KEY(doc_id, supersedes_doc_id))`
 - `ingest_log(run_id TEXT PRIMARY KEY, root_id TEXT NOT NULL, root_path TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT)`
 
@@ -149,7 +151,7 @@ test("rootId is stable for the same absolute path and differs across paths", () 
 Run: `npx vitest run test/config.test.ts`
 Expected: FAIL with "rootId is not a function" or module not found
 
-- [ ] **Step 3: Implement `rootId` and `loadConfig` in `indexer/src/config.ts`; write `worker/migrations/0001_init.sql` with the tables above**
+- [ ] **Step 3: Implement `rootId` and `loadConfig` in `indexer/src/config.ts`; implement `openDb(path)` in `indexer/src/db.ts` with the tables above**
 
 `loadConfig` throws if no root argument is given.
 
@@ -160,14 +162,15 @@ Expected: PASS
 
 - [ ] **Step 5: Apply migration locally**
 
-Run: `npx wrangler d1 migrations apply docs-agent --local`
+Run: `pnpm vitest run test/db.test.ts`
+Expected: PASS. The test opens a libsql `file:` database in a temp dir and asserts all tables, `chunks_fts`, and the vector index exist.
 Expected: "Migrations applied" with `0001_init.sql` listed.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add indexer/src/config.ts indexer/test/config.test.ts worker/migrations
-git commit -m "feat: config, root_id, D1 schema"
+git add indexer/src/config.ts indexer/src/db.ts indexer/test/config.test.ts indexer/test/db.test.ts
+git commit -m "feat: config, root_id, libsql schema"
 ```
 
 ---
@@ -254,64 +257,55 @@ git commit -m "feat: document identity and re-run matching"
 
 ---
 
-### Task 4: Parsers and per-page OCR fallback
+### Task 4: PDF parser
 
 **Files:**
-- Create: `indexer/src/parse/docx.ts`, `indexer/src/parse/pdf.ts`, `indexer/src/parse/doc.ts`, `indexer/src/parse/ocr.ts`, `indexer/src/parse/index.ts`
+- Create: `indexer/src/parse/pdf.ts`, `indexer/src/parse/index.ts`
 - Test: `indexer/test/parse.test.ts` (fixtures from Task 1)
 
 **Interfaces:**
 - Consumes: file path
-- Produces: `parseFile(absPath: string, opts: { ocrMinChars: number }): Promise<ParsedDoc>`
-  - `ParsedDoc = { pages: Array<{ page: number; text: string; source: "text" | "ocr" | "none" }>; unreadable: boolean; reason?: "copy-restricted" | "ocr-failed" | "parse-failed" }`
-  - `.doc` is converted to `.docx` via `soffice --headless --convert-to docx`; the converted file is written to a temp dir, never next to the original.
+- Produces: `parseFile(absPath: string): Promise<ParsedDoc>`
+  - `ParsedDoc = { pages: Array<{ page: number; text: string }>; unreadable: boolean; reason?: "copy-restricted" | "no-text-layer" | "parse-failed" }`
+  - Non-`.pdf` path: throws `UnsupportedFormatError`. The scanner filters these out before parsing, so this is a guard only.
   - Signed PDF: read-only; no write calls on the original.
   - Permission-restricted PDF: `unreadable = true`, `reason = "copy-restricted"`, no text returned. `status` stays date-derived, not set by extraction.
+  - All pages empty of text: `unreadable = true`, `reason = "no-text-layer"`. Individual empty pages are kept with `text: ""` and produce no chunks.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-test("docx yields one page with its text", async () => {
-  const d = await parseFile("test/fixtures/corpus/sample.docx", { ocrMinChars: 20 });
+test("digital pdf yields pages with text", async () => {
+  const d = await parseFile("test/fixtures/corpus/sample.pdf");
   expect(d.unreadable).toBe(false);
   expect(d.pages[0].text).toContain("Prosedur");
 });
 
-test("scanned pdf page falls back to OCR with source=ocr", async () => {
-  const d = await parseFile("test/fixtures/corpus/scanned.pdf", { ocrMinChars: 20 });
-  expect(d.pages.some(p => p.source === "ocr")).toBe(true);
+test("pdf with no text layer is flagged, not indexed as empty", async () => {
+  const d = await parseFile("test/fixtures/corpus/no-text-layer.pdf");
+  expect(d.unreadable).toBe(true);
+  expect(d.reason).toBe("no-text-layer");
 });
 
 test("copy-restricted pdf is flagged unreadable", async () => {
-  const d = await parseFile("test/fixtures/corpus/restricted.pdf", { ocrMinChars: 20 });
+  const d = await parseFile("test/fixtures/corpus/restricted.pdf");
   expect(d.unreadable).toBe(true);
   expect(d.reason).toBe("copy-restricted");
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Implement** `pdf.ts` (`pdfjs-dist` text per page; classify restricted and no-text-layer as above) and `index.ts` (accepts `.pdf` only; throws `UnsupportedFormatError` otherwise).
 
-Run: `npx vitest run test/parse.test.ts`
-Expected: FAIL with module not found for `parse/index`
-
-- [ ] **Step 3: Implement the parsers**
-
-- `docx.ts`: `mammoth.extractRawText({ path })` → single page.
-- `pdf.ts`: `pdfjs-dist` per page; a page with fewer non-whitespace characters than `ocrMinChars` goes to `ocr.ts`.
-- `ocr.ts`: `tesseract.js` with `ind+eng`, language data loaded from the vendored local path (Task 9 sets it up); page is rendered to an image in memory, never saved.
-- `doc.ts`: LibreOffice conversion to a temp `.docx`, then `docx.ts`.
-- `index.ts`: dispatch by extension.
-
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 3: Run tests to verify they pass**
 
 Run: `npx vitest run test/parse.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add indexer/src/parse indexer/test/parse.test.ts
-git commit -m "feat: parsers with per-page OCR fallback"
+git commit -m "feat: pdf parser with restricted and no-text-layer flags"
 ```
 
 ---
@@ -448,9 +442,9 @@ git commit -m "feat: date extraction and supersession with ambiguity flags"
 - Produces:
   - `embedTexts(texts: string[], key: string): Promise<number[][]>` via OpenRouter, model `openai/text-embedding-3-small`, provider pinned to OpenAI, no fallbacks
   - `interface VectorStore { upsert(vectors: Array<{ id: string; values: number[]; metadata: { docId: string } }>): Promise<void>; deleteByIds(ids: string[]): Promise<void> }`
-  - `applyRun(db: D1Database, store: VectorStore, plan: MatchPlan, chunksByDoc: Map<string, Chunk[]>, vectors: Map<string, number[]>, supersession: SupersessionResult, runId: string, rootId: string): Promise<void>`
+  - `applyRun(db: Client, store: VectorStore, plan: MatchPlan, chunksByDoc: Map<string, Chunk[]>, vectors: Map<string, number[]>, supersession: SupersessionResult, runId: string, rootId: string): Promise<void>` (`Client` from `@libsql/client`)
   - `applyRun` deletes orphaned chunk IDs, upserts changed ones, prunes only `pruned` rows (already filtered by `root_id` in Task 3), and writes `ingest_log`.
-  - Mapping (only place this is written to D1): `documents.read_error = parsed.unreadable ? parsed.reason : null`. The parser's `reason` is one of `copy-restricted` | `ocr-failed` | `parse-failed`; the parser sets it, `applyRun` only copies it. The parser never writes D1.
+  - Mapping (only place this is written to the database): `documents.read_error = parsed.unreadable ? parsed.reason : null`. The parser's `reason` is one of `copy-restricted` | `no-text-layer` | `parse-failed`; the parser sets it, `applyRun` only copies it. The parser never writes the database.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -458,7 +452,7 @@ git commit -m "feat: date extraction and supersession with ambiguity flags"
 test("pruned docs remove their chunk vectors and rows", async () => {
   const deleted: string[][] = [];
   const store: VectorStore = { upsert: async () => {}, deleteByIds: async ids => { deleted.push(ids); } };
-  // db: in-memory D1 stub seeded with doc "d1" and chunk "d1:1:0"
+  // db: in-memory libsql client seeded with doc "d1" and chunk "d1:1:0"
   await applyRun(db, store, { unchanged: [], newVersion: [], moved: [], added: [], pruned: ["d1"] },
     new Map(), new Map(), { byDoc: {}, supersedes: [] }, "run1", "R");
   expect(deleted).toEqual([["d1:1:0"]]);
@@ -472,7 +466,7 @@ Expected: FAIL with module not found
 
 - [ ] **Step 3: Implement the three modules**
 
-`embed.ts`: batches of up to 96 texts. `vector-store.ts`: REST implementation of `VectorStore` against the new index. `write.ts`: `applyRun` in one D1 batch per phase.
+`embed.ts`: batches of up to 96 texts. `vector-store.ts`: libsql implementation of `VectorStore` writing `chunk_vectors` rows with `vector32(?)` and deleting by `chunk_id`. `write.ts`: `applyRun` in one `client.batch(..., "write")` transaction per run.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -526,7 +520,7 @@ Expected: PASS
 - [ ] **Step 5: Run dry-run on the real folder**
 
 Run: `npx tsx indexer/src/cli.ts index <user-supplied-root> --dry-run`
-Expected: RunSummary printed, `unparsable` and `ocrPages` counts reported.
+Expected: RunSummary printed, with `unparsable` and skipped-non-PDF counts reported.
 
 - [ ] **Step 6: Commit**
 
@@ -537,89 +531,40 @@ git commit -m "feat: indexer run with dry-run"
 
 ---
 
-### Task 9: Vendor OCR traineddata
+### Task 10: Vector index in libsql
 
-> **Gated:** run only after Task 1 measurement confirms `tesseract.js` is the OCR choice (spec §11 item 3). If the measurement picks a CLI instead, skip this task and re-plan the OCR interface.
+**Files:** none beyond the schema in Task 2
 
-**Files:**
-- Create: `indexer/assets/tessdata/ind.traineddata`, `indexer/assets/tessdata/eng.traineddata`
-- Modify: `indexer/src/parse/ocr.ts` (set `langPath` to `indexer/assets/tessdata`)
+- [ ] **Step 1: Confirm the vector index is created by `openDb`**
 
-**Interfaces:**
-- Consumes: Task 4 `ocr.ts`
-- Produces: OCR never fetches language data over HTTP.
+Run: `pnpm vitest run test/db.test.ts`
+Expected: PASS, including the `chunk_vectors_idx` assertion from Task 2. No external index is created. Do not reuse `recon-learned-cases`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 2: Smoke-test `vector_top_k` on real libsql**
 
-```ts
-test("ocr uses local langPath and makes no network calls", async () => {
-  const fetchSpy = vi.spyOn(globalThis, "fetch");
-  await ocrPage(somePngBuffer(), { langPath: "assets/tessdata" });
-  expect(fetchSpy).not.toHaveBeenCalled();
-});
-```
+Run: `pnpm tsx indexer/scripts/vector-smoke.ts` (inserts two 1536-d vectors, queries top-1, prints the id)
+Expected: prints the nearest id.
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npx vitest run test/ocr.test.ts`
-Expected: FAIL with `fetch` called or `ocrPage` not exported
-
-- [ ] **Step 3: Download and vendor traineddata**
-
-Download `ind.traineddata` and `eng.traineddata` from the tessdata repository into `indexer/assets/tessdata/`. Set `langPath` in `ocr.ts`.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npx vitest run test/ocr.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add indexer/assets/tessdata indexer/src/parse/ocr.ts indexer/test/ocr.test.ts
-git commit -m "feat: vendor ind and eng traineddata"
+git add indexer/scripts/vector-smoke.ts
+git commit -m "chore: verify libsql vector_top_k"
 ```
 
 ---
 
-### Task 10: Create Vectorize index
-
-**Files:** none (infrastructure only)
-
-- [ ] **Step 1: Create the index**
-
-Run: `npx wrangler vectorize create docs-agent-chunks --dimensions 1536 --metric cosine`
-Expected: index created with 1536 dimensions. Do not reuse `recon-learned-cases`.
-
-- [ ] **Step 2: Bind it in `worker/wrangler.toml`**
-
-Add `[[vectorize]] binding = "VECTORIZE" index_name = "docs-agent-chunks"`.
-
-- [ ] **Step 3: Verify**
-
-Run: `npx wrangler vectorize info docs-agent-chunks`
-Expected: `dimensions: 1536`.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add worker/wrangler.toml
-git commit -m "chore: bind docs-agent-chunks vectorize index"
-```
-
----
-
-### Task 11: Worker query API (hybrid search, answer, draft)
+### Task 11: VoltAgent query API (hybrid search, answer, draft)
 
 **Files:**
-- Create: `worker/src/search.ts`, `worker/src/answer.ts`, `worker/src/index.ts`
-- Test: `worker/test/search.test.ts`, `worker/test/answer.test.ts`
+- Create: `src/query/search.ts`, `src/query/answer.ts`, `src/query/route.ts`
+- Test: `test/search.test.ts`, `test/answer.test.ts`
 
 **Interfaces:**
-- Consumes: D1 (Task 2 schema), VECTORIZE binding (Task 10), embedding (Task 7 `embedTexts` shape)
+- Consumes: libsql database from Task 2 (`chunks`, `chunks_fts`, `chunk_vectors`), embedding (Task 7 `embedTexts` shape)
 - Produces:
-  - `hybridSearch(env: Env, query: string, opts: { topK: number }): Promise<Hit[]>`; `Hit = { chunkId: string; docId: string; page: number; charStart: number; charEnd: number; text: string; score: number; status: "active" | "superseded" | "unparsable"; statusConfidence: "high" | "low"; alternates: string[]; stale: boolean }`. Keyword fallback runs FTS5 for exact names and numbers. Results merged by reciprocal rank fusion.
-  - `answer(env: Env, query: string, mode: "answer" | "draft"): Promise<AnswerResponse>`; `AnswerResponse = { text: string; citations: Citation[]; alternates: string[]; warnings: string[]; draft?: string }`; `Citation = { chunkId: string; docId: string; path: string; page: number; charStart: number; charEnd: number; status: "active" | "superseded" | "unparsable"; statusConfidence: "high" | "low"; stale: boolean }`. `draft` only in `mode: "draft"`. Response contains no Drive reference.
+  - `hybridSearch(db: Client, query: string, opts: { topK: number }): Promise<Hit[]>`; `Hit = { chunkId: string; docId: string; page: number; charStart: number; charEnd: number; text: string; score: number; status: "active" | "superseded" | "unparsable"; statusConfidence: "high" | "low"; alternates: string[]; stale: boolean }`. Vector hits use `vector_top_k` over `chunk_vectors`; keyword hits use FTS5 for exact names and numbers. Results merged by reciprocal rank fusion.
+  - `answer(db: Client, query: string, mode: "answer" | "draft"): Promise<AnswerResponse>`; `AnswerResponse = { text: string; citations: Citation[]; alternates: string[]; warnings: string[]; draft?: string }`; `Citation = { chunkId: string; docId: string; path: string; page: number; charStart: number; charEnd: number; status: "active" | "superseded" | "unparsable"; statusConfidence: "high" | "low"; stale: boolean }`. `draft` only in `mode: "draft"`. Response contains no Drive reference.
   - `POST /query` body `{ query: string; mode: "answer" | "draft" }`.
 
 Behavior: no hit → `text` says no source found, `citations: []`. `stale` hits → warning. `status_confidence = low` or non-empty `alternates` → warning listing them.
@@ -647,27 +592,29 @@ test("stale citation is marked stale in warnings", async () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run` (in `worker/`)
+Run: `pnpm vitest run test/search.test.ts test/answer.test.ts`
 Expected: FAIL with module not found for `answer` and `hybridSearch`
 
-- [ ] **Step 3: Implement search, answer, and route**
+- [ ] **Step 3: Implement search, answer, and the route**
+
+Register `POST /query` on the VoltAgent `honoServer` (configure hook on the Hono app, in `src/index.ts`). Keep the system prompt short: answer only from supplied passages; cite by `chunkId`; draft mode returns text only. Chat history and auth are out of scope.
 
 Keep the system prompt short: answer only from supplied passages; cite by `chunkId`; draft mode returns text only. Chat history and auth are out of scope.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npx vitest run` (in `worker/`)
+Run: `pnpm vitest run test/search.test.ts test/answer.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Smoke run**
 
-Run: `npx wrangler dev --remote`, then `curl -X POST localhost:8787/query -d '{"query":"...","mode":"answer"}' -H 'content-type: application/json'` against the real indexed corpus.
+Run: `pnpm dev`, then `curl -X POST <printed-port>/query -d '{"query":"...","mode":"answer"}' -H 'content-type: application/json'` against the real indexed corpus.
 Expected: JSON with `citations` pointing to real `chunkId`s and `text` that cites them.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add worker/src worker/test
+git add src/query test/search.test.ts test/answer.test.ts src/index.ts
 git commit -m "feat: hybrid search, answer, and draft endpoint"
 ```
 
