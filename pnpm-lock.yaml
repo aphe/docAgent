@@ -11,6 +11,9 @@ importers:
       '@libsql/client':
         specifier: ^0.18.0
         version: 0.18.0
+      '@openrouter/ai-sdk-provider':
+        specifier: ^2.10.0
+        version: 2.10.0(ai@6.0.322(zod@3.25.76))(zod@3.25.76)
       '@voltagent/cli':
         specifier: ^0.1.10
         version: 0.1.21(@ai-sdk/provider-utils@4.0.64(zod@3.25.76))(@ai-sdk/provider@3.0.19)(@types/node@22.20.5)(@voltagent/logger@2.0.2(@opentelemetry/api@1.9.1)(supports-color@7.2.0))(@voltagent/scorers@2.1.0(@voltagent/core@2.11.0(@ai-sdk/provider-utils@4.0.64(zod@3.25.76))(@ai-sdk/provider@3.0.19)(@voltagent/logger@2.0.2(@opentelemetry/api@1.9.1)(supports-color@7.2.0))(ai@6.0.322(zod@3.25.76))(debug@4.3.2(supports-color@7.2.0))(graphql@16.14.2)(supports-color@7.2.0)(ws@8.22.1)(zod@3.25.76))(ai@6.0.322(zod@3.25.76))(ws@8.22.1)(zod@3.25.76))(ai@6.0.322(zod@3.25.76))(debug@4.3.2(supports-color@7.2.0))(graphql@16.14.2)(supports-color@7.2.0)(ws@8.22.1)(zod@3.25.76)
@@ -892,6 +895,13 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@openrouter/ai-sdk-provider@2.10.0':
+    resolution: {integrity: sha512-FMsAEjLUt5pWuRE2LDC/LCvVrFjLlrEzUITH5+5SZtfq7KZ2wrOHjQVxzz92sju8S9ltpzW87CLW8/b0oBXVCw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      ai: ^6.0.0
+      zod: ^3.25.0 || ^4.0.0
 
   '@opentelemetry/api-logs@0.203.0':
     resolution: {integrity: sha512-9B9RU0H7Ya1Dx/Rkyc4stuBZSGVQF27WigitInx2QQoj6KUpEFYPKoWjdFTunJYxmXmh17HeBvbMa1EhGyPmqQ==}
@@ -4530,6 +4540,11 @@ snapshots:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
+
+  '@openrouter/ai-sdk-provider@2.10.0(ai@6.0.322(zod@3.25.76))(zod@3.25.76)':
+    dependencies:
+      ai: 6.0.322(zod@3.25.76)
+      zod: 3.25.76
 
   '@opentelemetry/api-logs@0.203.0':
     dependencies:

@@ -1,13 +1,12 @@
 import "dotenv/config";
-import { VoltAgent, VoltOpsClient, Agent, Memory, VoltAgentObservability } from "@voltagent/core";
+import { VoltAgent, VoltOpsClient, Memory, VoltAgentObservability } from "@voltagent/core";
 import { LibSQLMemoryAdapter, LibSQLObservabilityAdapter } from "@voltagent/libsql";
 import { createPinoLogger } from "@voltagent/logger";
 import { honoServer } from "@voltagent/server-hono";
 import { DEFAULT_DB_PATH } from "../indexer/src/config";
 import { openDb } from "../indexer/src/db";
+import { createDocAgent } from "./agent/doc-agent";
 import { createQueryHandler } from "./query/route";
-import { expenseApprovalWorkflow } from "./workflows";
-import { weatherTool } from "./tools";
 
 // Create a logger instance
 const logger = createPinoLogger({
@@ -30,29 +29,18 @@ const observability = new VoltAgentObservability({
   }),
 });
 
-const agent = new Agent({
-  name: "docAgent",
-  instructions: "A helpful assistant that can check weather and help with various tasks",
-  model: "openai/gpt-4o-mini",
-  tools: [weatherTool],
-  memory,
-});
-
 const db = await openDb(process.env.DB_PATH ?? DEFAULT_DB_PATH);
+const key = process.env.OPENROUTER_API_KEY ?? "";
+
+const agent = createDocAgent(db, memory, { key });
 
 new VoltAgent({
   agents: {
     agent,
   },
-  workflows: {
-    expenseApprovalWorkflow,
-  },
   server: honoServer({
     configureApp: (app) => {
-      app.post(
-        "/query",
-        createQueryHandler(db, { key: process.env.OPENROUTER_API_KEY ?? "" }),
-      );
+      app.post("/query", createQueryHandler(db, { key }));
     },
   }),
   logger,

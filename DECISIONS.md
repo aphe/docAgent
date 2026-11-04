@@ -77,3 +77,4 @@ Status: draft, living note. Append as answers arrive. Not code.
 
 22. **Ruling: API JSON stays camelCase.** The query API returns camelCase keys (`chunkId`, `docId`, `charStart`, `charEnd`, `statusConfidence`) and the spec §9 example is updated to match. The database keeps snake_case columns; only the JSON boundary is camelCase. User-approved.
 23. **Ruling: vector distance cutoff.** The vector leg keeps only cosine-distance hits at or below 0.5 (libsql `vector_distance_cos`). Farther hits are dropped as noise; FTS-only remains when no vector hit survives.
+24. **Ruling: VoltOps tracing sends content to a hosted service.** When `VOLTAGENT_PUBLIC_KEY`/`VOLTAGENT_SECRET_KEY` are set, traces include query text, retrieved passages, and LLM I/O, sent to `console.voltagent.dev`. Departs from spec §10 (which allowed only embedding calls off-machine). User-approved for M1. Whether unsetting the keys fully disables tracing is `[UNVERIFIED]`.

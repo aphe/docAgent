@@ -114,7 +114,7 @@ Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) with cosine di
 7. A copy-restricted PDF has `read_error = copy-restricted` and produces no chunks.
 8. A query with no match returns no citations and says no source was found.
 9. Changing the root path does not prune rows of another `root_id`.
-10. Indexing reads files locally. Only embedding requests leave the machine.
+10. Indexing reads files locally. Only embedding requests leave the machine. **Exception (user-approved):** VoltOps tracing, when keys are set, sends query text, retrieved passages, and LLM input/output to the VoltOps hosted service (`console.voltagent.dev`).
 11. Recall@5 and citation accuracy on the user's test questions meet the success bar (section 12).
 
 ## 11. Open items (must be resolved before build)
