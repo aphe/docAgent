@@ -64,17 +64,22 @@ export const SCHEMA_STATEMENTS = [
  * Open (or create) the libsql database at `path` and ensure the schema exists.
  * `path` may be a plain file path, an explicit `file:` URL, or `:memory:`.
  */
-export async function openDb(path: string): Promise<Client> {
+export async function openDb(
+  path: string,
+  options: { readOnly?: boolean } = {},
+): Promise<Client> {
   const memory = path === ":memory:";
   const filePath = path.startsWith("file:") ? path.slice("file:".length) : path;
   const remote = !memory && !path.startsWith("file:") && path.includes("://");
   const url = memory || remote ? path : `file:${filePath}`;
 
-  if (!memory && !remote) {
+  if (!memory && !remote && !options.readOnly) {
     await mkdir(dirname(filePath), { recursive: true });
   }
 
   const client = createClient({ url });
-  await client.batch(SCHEMA_STATEMENTS, "write");
+  if (!options.readOnly) {
+    await client.batch(SCHEMA_STATEMENTS, "write");
+  }
   return client;
 }

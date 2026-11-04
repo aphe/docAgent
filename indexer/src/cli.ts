@@ -61,10 +61,21 @@ function parseIndexArgs(args: string[]): IndexOptions {
  */
 async function openIndexDb(dbPath: string, dryRun: boolean): Promise<Client> {
   if (!dryRun) return openDb(dbPath);
-  const exists = await stat(dbPath)
-    .then(() => true)
-    .catch(() => false);
-  return openDb(exists ? dbPath : ":memory:");
+
+  if (dbPath === ":memory:") return openDb(dbPath);
+
+  const isPlainPath = !dbPath.startsWith("file:") && !dbPath.includes("://");
+  if (isPlainPath) {
+    const exists = await stat(dbPath)
+      .then(() => true)
+      .catch(() => false);
+    if (!exists) return openDb(":memory:");
+    return openDb(dbPath, { readOnly: true });
+  }
+
+  // file: and remote URLs cannot be stat()ed; pass them straight to openDb
+  // and skip the schema bootstrap so an existing database is never written.
+  return openDb(dbPath, { readOnly: true });
 }
 
 async function runIndexCommand(options: IndexOptions): Promise<void> {

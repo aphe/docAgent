@@ -145,7 +145,10 @@ function freshDates(
   parsed: ParsedDoc,
 ): DocDates {
   const text = parsed.pages.map((page) => page.text).join("\n");
-  const extracted = extractDates(text, relativePath);
+  const extracted = extractDates(
+    text,
+    parsed.unreadable ? undefined : relativePath,
+  );
   return {
     docId,
     topicKey: topicKeyFor(relativePath),
