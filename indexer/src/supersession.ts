@@ -78,13 +78,18 @@ export function deriveSupersession(docs: DocDates[]): SupersessionResult {
     const datedIds = dated.map((doc) => doc.docId);
 
     if (winners.length > 1) {
-      const winnerIds = winners.map((doc) => doc.docId);
       for (const doc of winners) {
         byDoc[doc.docId] = {
           status: "active",
           statusConfidence: "low",
           alternates: datedIds.filter((id) => id !== doc.docId),
         };
+        for (const older of others) {
+          supersedes.push({
+            docId: doc.docId,
+            supersedesDocId: older.docId,
+          });
+        }
       }
       for (const doc of others) {
         byDoc[doc.docId] = {

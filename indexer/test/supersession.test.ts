@@ -127,6 +127,50 @@ describe("deriveSupersession", () => {
     expect(result.supersedes).toEqual([]);
   });
 
+  test("a tie records edges to older documents from every tied winner", () => {
+    const result = deriveSupersession([
+      {
+        docId: "a",
+        topicKey: "sop",
+        effective: "2025-02-01",
+        raw: [],
+        isLampiran: false,
+      },
+      {
+        docId: "b",
+        topicKey: "sop",
+        effective: "2025-02-01",
+        raw: [],
+        isLampiran: false,
+      },
+      {
+        docId: "old",
+        topicKey: "sop",
+        effective: "2024-01-01",
+        raw: [],
+        isLampiran: false,
+      },
+    ]);
+    expect(result.byDoc.old.status).toBe("superseded");
+    expect(result.supersedes).toContainEqual({
+      docId: "a",
+      supersedesDocId: "old",
+    });
+    expect(result.supersedes).toContainEqual({
+      docId: "b",
+      supersedesDocId: "old",
+    });
+    expect(result.supersedes).not.toContainEqual({
+      docId: "a",
+      supersedesDocId: "b",
+    });
+    expect(result.supersedes).not.toContainEqual({
+      docId: "b",
+      supersedesDocId: "a",
+    });
+    expect(result.supersedes).toHaveLength(2);
+  });
+
   test("issued-date fallback winner with another effective date is low", () => {
     const result = deriveSupersession([
       {

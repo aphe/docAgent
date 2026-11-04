@@ -29,16 +29,15 @@ const MONTH_PATTERN = Object.keys(MONTHS).join("|");
 
 /**
  * ISO first so a leading four-digit year is never read as a day. The named
- * form follows; the trailing numeric form is the Indonesian day-first
- * convention (DD-MM-YYYY or DD/MM/YYYY).
+ * Indonesian month form follows. Other numeric day-first variants are not
+ * part of the brief and are deliberately left unparsed.
  */
 const DATE_PATTERN =
   "(?<!\\d)(?:" +
-  "(?<isoYear>\\d{4})[-/](?<isoMonth>\\d{1,2})[-/](?<isoDay>\\d{1,2})" +
+  "(?<isoYear>\\d{4})-(?<isoMonth>\\d{2})-(?<isoDay>\\d{2})" +
   "|(?<namedDay>\\d{1,2})\\s+(?<namedMonth>" +
   MONTH_PATTERN +
   ")\\s+(?<namedYear>\\d{4})" +
-  "|(?<day>\\d{1,2})[-/](?<month>\\d{1,2})[-/](?<year>\\d{4})" +
   ")(?!\\d)";
 
 const ISSUED_LABEL = /(?:tanggal\s+ditetapkan|ditetapkan)/i;
@@ -85,13 +84,6 @@ function isoFromMatch(match: RegExpExecArray): string | undefined {
   if (groups.namedYear !== undefined) {
     const month = MONTHS[groups.namedMonth.toLowerCase()];
     return toIso(Number(groups.namedYear), month, Number(groups.namedDay));
-  }
-  if (groups.year !== undefined) {
-    return toIso(
-      Number(groups.year),
-      Number(groups.month),
-      Number(groups.day),
-    );
   }
   return undefined;
 }

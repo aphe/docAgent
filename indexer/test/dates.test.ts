@@ -25,19 +25,22 @@ describe("extractDates", () => {
     expect(result.effective).toBe("2024-02-01");
   });
 
-  test("parses ISO and day-first numeric formats", () => {
+  test("parses ISO numeric dates", () => {
     const result = extractDates(
-      "Tanggal ditetapkan: 15/01/2024. Diundangkan: 2024-02-20.",
+      "Tanggal ditetapkan: 2024-01-15. Diundangkan: 2024-02-20.",
     );
     expect(result.issued).toBe("2024-01-15");
     expect(result.effective).toBe("2024-02-20");
-    expect(result.raw).toEqual(["15/01/2024", "2024-02-20"]);
+    expect(result.raw).toEqual(["2024-01-15", "2024-02-20"]);
   });
 
-  test("parses day-first numeric dates with dashes", () => {
-    const result = extractDates("Ditetapkan pada 31-12-2024.");
-    expect(result.issued).toBe("2024-12-31");
-    expect(result.raw).toEqual(["31-12-2024"]);
+  test("does not parse removed day-first and slash ISO formats", () => {
+    const result = extractDates(
+      "Ditetapkan pada 12/03/2024. Diundangkan pada 12-03-2024. ISO slash 2024/02/20.",
+    );
+    expect(result.issued).toBeUndefined();
+    expect(result.effective).toBeUndefined();
+    expect(result.raw).toEqual([]);
   });
 
   test("recognizes every Indonesian month name", () => {
