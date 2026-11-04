@@ -157,6 +157,9 @@ dist
 # M1 extras
 .wrangler
 
-# Local document corpus (M1 root). Contents are not tracked.
-docs/*
-!docs/superpowers/
+# Local document corpus (M1 root). Contents not tracked; README kept so the root exists on clone.
+data-files/*
+!data-files/README.md
+
+# Local index database (holds extracted corpus text)
+data/
