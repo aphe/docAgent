@@ -72,3 +72,5 @@ Status: draft, living note. Append as answers arrive. Not code.
 1. Done: Task 1 corpus measurement run on `data-files/` (result above).
 2. Measure folder mix when the Drive source is designed next iteration.
 3. When the document set is gathered: collect test questions and set the bar; then confirm or replace the provisional models.
+
+21. **Ruling: unreadable docs get no filename-date fallback** — spec §6: an unreadable doc must not get a status it cannot justify — stays unparsable — user-approved date-source change applied to readable docs only.
