@@ -65,7 +65,7 @@ export function createDocAgent(db: Client, memory: Memory, deps: AnswerDeps = {}
     name: "docAgent",
     instructions:
       "Anda asisten dokumen SOP dan perjanjian. Gunakan answer_question untuk menjawab, " +
-      "search_documents untuk melihat potongan mentah, dan draft_revision untuk draf. " +
+      "search_documents hanya untuk pratinjau relevansi (jangan jawab atau kutip dari hasil itu), dan draft_revision untuk draf. " +
       "Jawab hanya dari hasil tool. Sebutkan dokumen yang superseded atau tidak terbaca.",
     model: createOpenRouter({ apiKey: deps.key ?? "" })("openai/gpt-6-luna"),
     tools: [searchDocuments, answerQuestion, draftRevision],
