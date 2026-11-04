@@ -48,6 +48,9 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.5
+      hono:
+        specifier: 4.13.16
+        version: 4.13.16
       tsdown:
         specifier: ^0.15.2
         version: 0.15.12(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(supports-color@7.2.0)(typescript@5.9.3)

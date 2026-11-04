@@ -91,9 +91,9 @@ Supersession is shown, not silently ranked. The user approved date-based superse
 
 Response:
 ```
-{ text: string, citations: Citation[], alternates: string[], warnings: string[], draft?: string }
+{ text: string, citations: Citation[], alternates: { docId: string, path: string }[], warnings: string[], draft?: string }
 ```
-`Citation`: `chunk_id`, `doc_id`, `path`, `page`, `char_start`, `char_end`, `status`, `status_confidence`, `stale`.
+`Citation`: `chunkId`, `docId`, `path`, `page`, `charStart`, `charEnd`, `status`, `statusConfidence`, `stale`.
 
 Behavior:
 - No relevant chunk → `text` says no source was found; `citations` is empty. No invented citation.
@@ -101,7 +101,7 @@ Behavior:
 - A citation whose `doc_id` version changed since indexing → `stale = true` and a warning.
 - `mode: "draft"` → `draft` contains the revised text. Nothing is written to disk or Drive.
 
-Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) merged with FTS5 top-K by reciprocal rank fusion.
+Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) with cosine distance at or below 0.5 merged with FTS5 top-K by reciprocal rank fusion.
 
 ## 10. Acceptance criteria
 

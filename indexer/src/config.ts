@@ -9,7 +9,7 @@ export interface Config {
   minTextChars: number;
 }
 
-const DEFAULT_DB_PATH = "data/docs-agent.db";
+export const DEFAULT_DB_PATH = "data/docs-agent.db";
 const DEFAULT_MIN_TEXT_CHARS = 20;
 const SCRIPT_NAMES: Record<string, true> = {
   node: true,

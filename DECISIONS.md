@@ -74,3 +74,6 @@ Status: draft, living note. Append as answers arrive. Not code.
 3. When the document set is gathered: collect test questions and set the bar; then confirm or replace the provisional models.
 
 21. **Ruling: unreadable docs get no filename-date fallback** — spec §6: an unreadable doc must not get a status it cannot justify — stays unparsable — user-approved date-source change applied to readable docs only.
+
+22. **Ruling: API JSON stays camelCase.** The query API returns camelCase keys (`chunkId`, `docId`, `charStart`, `charEnd`, `statusConfidence`) and the spec §9 example is updated to match. The database keeps snake_case columns; only the JSON boundary is camelCase. User-approved.
+23. **Ruling: vector distance cutoff.** The vector leg keeps only cosine-distance hits at or below 0.5 (libsql `vector_distance_cos`). Farther hits are dropped as noise; FTS-only remains when no vector hit survives.

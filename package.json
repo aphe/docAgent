@@ -28,6 +28,7 @@
     "@biomejs/biome": "^1.9.4",
     "@cantoo/pdf-lib": "^2.11.1",
     "@types/node": "^22.10.5",
+    "hono": "4.13.16",
     "tsdown": "^0.15.2",
     "tsx": "^4.23.15",
     "typescript": "^5.7.3",

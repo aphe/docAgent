@@ -28,10 +28,19 @@ export interface SearchDeps {
    */
   embed?: EmbedTexts;
   key?: string;
+  /** Optional sink for degraded-search warnings; `hybridSearch` appends. */
+  warnings?: string[];
 }
 
 /** Reciprocal rank fusion constant from the common RRF recipe. */
 const RRF_K = 60;
+
+/**
+ * Cosine-distance cutoff for the vector leg. libsql reports 0 for identical
+ * vectors and 2 for opposite vectors; 0.5 keeps meaningful semantic matches
+ * and drops unrelated ones. Documented in DECISIONS.md.
+ */
+const MAX_VECTOR_DISTANCE = 0.5;
 
 interface ChunkRow {
   chunk_id: string;
@@ -92,32 +101,27 @@ async function vectorHits(
   limit: number,
 ): Promise<string[]> {
   if (limit <= 0) return [];
-  const top = await db.execute({
-    sql: "SELECT id FROM vector_top_k('chunk_vectors_idx', vector32(?), ?)",
-    args: [JSON.stringify(vector), limit],
+  const json = JSON.stringify(vector);
+  const result = await db.execute({
+    sql: `WITH vtop AS (
+            SELECT id FROM vector_top_k('chunk_vectors_idx', vector32(?), ?)
+          )
+          SELECT cv.chunk_id AS chunk_id,
+                 vector_distance_cos(cv.embedding, vector32(?)) AS distance
+          FROM vtop
+          JOIN chunk_vectors cv ON cv.rowid = vtop.id
+          WHERE vector_distance_cos(cv.embedding, vector32(?)) <= ?
+          ORDER BY distance ASC`,
+    args: [json, limit, json, json, MAX_VECTOR_DISTANCE],
   });
-  const rowIds = top.rows.map((row) => Number(row.id));
-  if (rowIds.length === 0) return [];
-
-  const placeholders = rowIds.map(() => "?").join(", ");
-  const rows = await db.execute({
-    sql: `SELECT rowid, chunk_id FROM chunk_vectors WHERE rowid IN (${placeholders})`,
-    args: rowIds,
-  });
-  const byRowId = new Map<number, string>();
-  for (const row of rows.rows) {
-    byRowId.set(Number(row.rowid), String(row.chunk_id));
-  }
-  return rowIds
-    .map((rowId) => byRowId.get(rowId))
-    .filter((chunkId): chunkId is string => chunkId !== undefined);
+  return result.rows.map((row) => String(row.chunk_id));
 }
 
 async function queryVector(
   query: string,
   deps: SearchDeps,
 ): Promise<number[] | null> {
-  const key = deps.key ?? process.env.OPENROUTER_API_KEY ?? "";
+  const key = deps.key ?? "";
   const embed = deps.embed ?? defaultEmbedTexts;
   if (deps.embed === undefined && key.trim() === "") return null;
   const [vector] = await embed([query], key);
@@ -203,8 +207,9 @@ function toHit(row: ChunkRow, score: number): Hit {
  * reciprocal rank fusion. Documents with a read error are never returned.
  *
  * The vector leg needs an embedding. Pass `opts.embed` to inject one (tests
- * use a stub); otherwise `opts.key` or `OPENROUTER_API_KEY` must be set.
- * Without either, the search is FTS5-only instead of failing.
+ * use a stub); otherwise `opts.key` must be set. Without either, the search
+ * is FTS5-only instead of failing. Embedding or vector-query errors also fall
+ * back to FTS5-only and append "vector search unavailable" to `opts.warnings`.
  */
 export async function hybridSearch(
   db: Client,
@@ -214,11 +219,18 @@ export async function hybridSearch(
   const topK = Math.max(0, Math.trunc(opts.topK));
   if (topK === 0) return [];
 
-  const [keywordIds, vector] = await Promise.all([
+  const [keywordIds, vectorIds] = await Promise.all([
     keywordHits(db, query, topK),
-    queryVector(query, opts),
+    (async () => {
+      try {
+        const vector = await queryVector(query, opts);
+        return vector ? await vectorHits(db, vector, topK) : [];
+      } catch {
+        opts.warnings?.push("vector search unavailable");
+        return [];
+      }
+    })(),
   ]);
-  const vectorIds = vector ? await vectorHits(db, vector, topK) : [];
 
   const fused = fuse([keywordIds, vectorIds]).slice(0, topK);
   const rows = await loadChunkRows(

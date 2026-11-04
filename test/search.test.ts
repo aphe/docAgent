@@ -87,6 +87,12 @@ function unitVector(index: number): number[] {
   return values;
 }
 
+function vectorWith(entries: Array<[number, number]>): number[] {
+  const values = new Array<number>(1536).fill(0);
+  for (const [index, value] of entries) values[index] = value;
+  return values;
+}
+
 async function insertVector(
   db: Client,
   chunkId: string,
@@ -140,7 +146,11 @@ test("stale citation is marked stale", async () => {
     versionKey: "v1",
   });
 
-  const hits = await hybridSearch(db, "cuti", { topK: 5 });
+  const hits = await hybridSearch(db, "cuti", {
+    topK: 5,
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+  });
   expect(hits.find((hit) => hit.stale)).toBeDefined();
 });
 
@@ -157,6 +167,81 @@ test("unreadable documents are never returned as hits", async () => {
     text: "prosedur cuti",
   });
 
-  const hits = await hybridSearch(db, "cuti", { topK: 5 });
+  const hits = await hybridSearch(db, "cuti", {
+    topK: 5,
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+  });
   expect(hits).toEqual([]);
+});
+
+test("far vector hits are dropped by the cosine cutoff", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+  await insertVector(db, "doc-a:1:0", unitVector(0));
+
+  const hits = await hybridSearch(db, "xyz", {
+    topK: 5,
+    key: "test-key",
+    embed: async () => [unitVector(1)],
+  });
+
+  expect(hits).toEqual([]);
+});
+
+test("vector search failure falls back to FTS hits with a warning", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+  const warnings: string[] = [];
+
+  const hits = await hybridSearch(db, "cuti", {
+    topK: 5,
+    key: "test-key",
+    embed: async () => {
+      throw new Error("embedding service down");
+    },
+    warnings,
+  });
+
+  expect(hits.map((hit) => hit.chunkId)).toEqual(["doc-a:1:0"]);
+  expect(warnings).toContain("vector search unavailable");
+});
+
+test("a chunk in both legs ranks first with the summed RRF score", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertDoc(db, { docId: "doc-b", path: "NEW SOP/libur.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+  await insertChunk(db, {
+    chunkId: "doc-b:1:0",
+    docId: "doc-b",
+    text: "libur bersama akhir tahun",
+  });
+  await insertVector(db, "doc-a:1:0", unitVector(0));
+  await insertVector(db, "doc-b:1:0", vectorWith([[0, 0.8], [1, 0.6]]));
+
+  const hits = await hybridSearch(db, "cuti", {
+    topK: 2,
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+  });
+
+  expect(hits[0].chunkId).toBe("doc-a:1:0");
+  expect(hits[0].score).toBeCloseTo(2 / 61, 10);
+  expect(hits[1].chunkId).toBe("doc-b:1:0");
+  expect(hits[1].score).toBeCloseTo(1 / 62, 10);
 });

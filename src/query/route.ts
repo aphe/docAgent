@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { answer, type AnswerDeps } from "./answer";
 
 const MODES: Record<string, true> = { answer: true, draft: true };
+const MAX_QUERY_CHARS = 2000;
 
 function badRequest(c: Context, message: string): Response {
   return c.json({ error: message }, 400);
@@ -33,6 +34,9 @@ export function createQueryHandler(
     if (typeof query !== "string" || query.trim() === "") {
       return badRequest(c, "query must be a non-empty string");
     }
+    if (query.length > MAX_QUERY_CHARS) {
+      return badRequest(c, `query must be at most ${MAX_QUERY_CHARS} characters`);
+    }
     if (typeof mode !== "string" || MODES[mode] !== true) {
       return badRequest(c, 'mode must be "answer" or "draft"');
     }
@@ -41,8 +45,8 @@ export function createQueryHandler(
       const result = await answer(db, query.trim(), mode as "answer" | "draft", deps);
       return c.json(result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "query failed";
-      return c.json({ error: message }, 500);
+      console.error("query failed", error);
+      return c.json({ error: "query failed" }, 500);
     }
   };
 }

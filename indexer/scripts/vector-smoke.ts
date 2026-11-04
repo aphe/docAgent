@@ -26,11 +26,11 @@ async function main() {
     args: [JSON.stringify(query)],
   });
 
-  if (result.rows.length > 0) {
-    console.log(String(result.rows[0].chunk_id));
-  } else {
-    console.log("No results");
+  const nearest = result.rows.length > 0 ? String(result.rows[0].chunk_id) : "";
+  if (nearest !== "chunk-1") {
+    throw new Error(`Expected nearest chunk-1, got ${nearest || "no result"}`);
   }
+  console.log(nearest);
 
   db.close();
 }

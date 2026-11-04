@@ -15,6 +15,12 @@ async function makeDb(): Promise<Client> {
   return db;
 }
 
+function unitVector(index: number): number[] {
+  const values = new Array<number>(1536).fill(0);
+  values[index] = 1;
+  return values;
+}
+
 interface DocInput {
   docId: string;
   path: string;
@@ -63,15 +69,30 @@ async function insertChunk(
   });
 }
 
+async function insertVector(
+  db: Client,
+  chunkId: string,
+  values: number[],
+): Promise<void> {
+  await db.execute({
+    sql: "INSERT INTO chunk_vectors (chunk_id, embedding) VALUES (?, vector32(?))",
+    args: [chunkId, JSON.stringify(values)],
+  });
+}
+
 test("no hits yields no citations and no invented source", async () => {
   const db = await makeDb();
   const r = await answer(db, "prosedur cuti", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(0)],
     chat: async () => {
       throw new Error("LLM must not be called without hits");
     },
   });
   expect(r.citations).toEqual([]);
   expect(r.text).toMatch(/tidak ditemukan|no source/i);
+  expect(r.draft).toBeUndefined();
+  expect(Object.keys(r).sort()).toEqual(["alternates", "citations", "text", "warnings"]);
 });
 
 test("low-confidence active doc surfaces alternates as a warning", async () => {
@@ -97,13 +118,20 @@ test("low-confidence active doc surfaces alternates as a warning", async () => {
   });
 
   const r = await answer(db, "SOP cuti", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(0)],
     chat: async () => "Menurut [doc-a:1:0], cuti tahunan diajukan ke atasan.",
   });
 
-  expect(r.alternates).toEqual(["doc-b"]);
-  expect(r.warnings.length).toBeGreaterThan(0);
+  expect(r.alternates).toEqual([
+    { docId: "doc-b", path: "NEW SOP/cuti-lama.pdf" },
+  ]);
+  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti.pdf"))).toBe(true);
+  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti-lama.pdf"))).toBe(true);
   expect(r.text).toContain("doc-a:1:0");
   expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-a:1:0"]);
+  expect(r.draft).toBeUndefined();
+  expect(Object.keys(r).sort()).toEqual(["alternates", "citations", "text", "warnings"]);
 });
 
 test("stale hit produces a stale warning", async () => {
@@ -121,14 +149,17 @@ test("stale hit produces a stale warning", async () => {
   });
 
   const r = await answer(db, "cuti", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(0)],
     chat: async () => "Menurut [doc-a:1:0], cuti diajukan.",
   });
 
   expect(r.citations[0].stale).toBe(true);
   expect(r.warnings.some((warning) => /stale/i.test(warning))).toBe(true);
+  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti.pdf"))).toBe(true);
 });
 
-test("draft mode returns text only with no Drive reference", async () => {
+test("draft mode returns text and draft with no Drive field", async () => {
   const db = await makeDb();
   await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
   await insertChunk(db, {
@@ -138,10 +169,148 @@ test("draft mode returns text only with no Drive reference", async () => {
   });
 
   const r = await answer(db, "cuti", "draft", {
-    chat: async () => "Draf: cuti tahunan diajukan paling lambat tiga hari kerja.",
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+    chat: async () => "Draf: cuti tahunan diajukan paling lambat tiga hari kerja [doc-a:1:0].",
   });
 
   expect(typeof r.draft).toBe("string");
   expect(r.draft).toContain("Draf");
-  expect(JSON.stringify(r).toLowerCase()).not.toContain("drive");
+  expect(Object.keys(r).sort()).toEqual([
+    "alternates",
+    "citations",
+    "draft",
+    "text",
+    "warnings",
+  ]);
+});
+
+test("only citations the model text cites are kept", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertDoc(db, { docId: "doc-b", path: "NEW SOP/cuti-lama.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+  await insertChunk(db, {
+    chunkId: "doc-b:1:0",
+    docId: "doc-b",
+    text: "prosedur cuti lama",
+  });
+
+  const r = await answer(db, "cuti", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+    chat: async () => "Menurut [doc-a:1:0], cuti tahunan diajukan.",
+  });
+
+  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-a:1:0"]);
+});
+
+test("model text without a citation returns no source and no citations", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+
+  const r = await answer(db, "cuti", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+    chat: async () => "Tidak ada kutipan yang cocok.",
+  });
+
+  expect(r.text).toMatch(/tidak ditemukan|no source/i);
+  expect(r.citations).toEqual([]);
+});
+
+test("far vector with no keyword match returns no source", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+  await insertVector(db, "doc-a:1:0", unitVector(0));
+
+  const r = await answer(db, "xyz", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(1)],
+    chat: async () => {
+      throw new Error("LLM must not be called without hits");
+    },
+  });
+
+  expect(r.text).toMatch(/tidak ditemukan|no source/i);
+  expect(r.citations).toEqual([]);
+});
+
+test("embedding failure warns and still answers from FTS hits", async () => {
+  const db = await makeDb();
+  await insertDoc(db, { docId: "doc-a", path: "NEW SOP/cuti.pdf" });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+
+  const r = await answer(db, "cuti", "answer", {
+    key: "test-key",
+    embed: async () => {
+      throw new Error("embedding service down");
+    },
+    chat: async () => "Menurut [doc-a:1:0], cuti diajukan.",
+  });
+
+  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-a:1:0"]);
+  expect(r.warnings).toContain("vector search unavailable");
+});
+
+test("passages carry status and confidence and inactive citations warn by path", async () => {
+  const db = await makeDb();
+  await insertDoc(db, {
+    docId: "doc-a",
+    path: "NEW SOP/cuti.pdf",
+    status: "active",
+  });
+  await insertDoc(db, {
+    docId: "doc-b",
+    path: "NEW SOP/cuti-lama.pdf",
+    status: "superseded",
+  });
+  await insertChunk(db, {
+    chunkId: "doc-a:1:0",
+    docId: "doc-a",
+    text: "prosedur cuti tahunan",
+  });
+  await insertChunk(db, {
+    chunkId: "doc-b:1:0",
+    docId: "doc-b",
+    text: "prosedur cuti lama",
+  });
+
+  let messages: Array<{ role: string; content: string }> = [];
+  const r = await answer(db, "cuti", "answer", {
+    key: "test-key",
+    embed: async () => [unitVector(0)],
+    chat: async (msgs) => {
+      messages = msgs;
+      return "Menurut [doc-b:1:0], cuti lama berlaku.";
+    },
+  });
+
+  const system = messages.find((message) => message.role === "system")?.content ?? "";
+  const user = messages.find((message) => message.role === "user")?.content ?? "";
+  expect(system).toContain("data");
+  expect(system).toContain("active");
+  expect(user).toContain('<passage id="doc-b:1:0">');
+  expect(user).toContain("status: superseded");
+  expect(user).toContain("confidence: high");
+  expect(r.citations.map((citation) => citation.chunkId)).toEqual(["doc-b:1:0"]);
+  expect(r.warnings.some((warning) => warning.includes("NEW SOP/cuti-lama.pdf"))).toBe(true);
 });
