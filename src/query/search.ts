@@ -78,6 +78,20 @@ function parseAlternates(raw: string | null): string[] {
   }
 }
 
+const STOPWORDS: Record<string, true> = {
+  bagaimana: true, cara: true, untuk: true, dan: true, yang: true, di: true,
+  ke: true, dari: true, apa: true, apakah: true, dengan: true, pada: true,
+  atau: true, ini: true, itu: true, dalam: true, saya: true, kami: true,
+  bisa: true, adalah: true, the: true, is: true, a: true, an: true, of: true,
+  to: true, how: true, what: true,
+};
+
+/**
+ * Keyword leg: a chunk must contain at least half of the query's content
+ * tokens (stopwords removed; minimum 2 when the query has 2+ content tokens).
+ * Without this floor an off-topic query matches on common words and floods
+ * topK with unrelated citations.
+ */
 async function keywordHits(
   db: Client,
   query: string,
@@ -85,14 +99,36 @@ async function keywordHits(
 ): Promise<string[]> {
   const match = toFtsQuery(query);
   if (match === "" || limit <= 0) return [];
+  const content = Array.from(
+    new Set(
+      (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
+        (t) => STOPWORDS[t] !== true,
+      ),
+    ),
+  );
+  const required =
+    content.length === 0
+      ? 0
+      : content.length === 1
+        ? 1
+        : Math.max(2, Math.ceil(content.length / 2));
   const result = await db.execute({
-    sql: `SELECT chunk_id FROM chunks_fts
+    sql: `SELECT chunk_id, text FROM chunks_fts
           WHERE chunks_fts MATCH ?
           ORDER BY bm25(chunks_fts)
           LIMIT ?`,
-    args: [match, limit],
+    args: [match, limit * 4],
   });
-  return result.rows.map((row) => String(row.chunk_id));
+  const kept: string[] = [];
+  for (const row of result.rows) {
+    const words = new Set(
+      String(row.text).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [],
+    );
+    const hits = content.filter((t) => words.has(t)).length;
+    if (hits >= required) kept.push(String(row.chunk_id));
+    if (kept.length >= limit) break;
+  }
+  return kept;
 }
 
 async function vectorHits(
