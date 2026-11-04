@@ -3,6 +3,8 @@ import { VoltAgent, VoltOpsClient, Agent, Memory, VoltAgentObservability } from 
 import { LibSQLMemoryAdapter, LibSQLObservabilityAdapter } from "@voltagent/libsql";
 import { createPinoLogger } from "@voltagent/logger";
 import { honoServer } from "@voltagent/server-hono";
+import { openDb } from "../indexer/src/db";
+import { createQueryHandler } from "./query/route";
 import { expenseApprovalWorkflow } from "./workflows";
 import { weatherTool } from "./tools";
 
@@ -35,6 +37,8 @@ const agent = new Agent({
   memory,
 });
 
+const db = await openDb(process.env.DB_PATH ?? "data/docs-agent.db");
+
 new VoltAgent({
   agents: {
     agent,
@@ -42,7 +46,11 @@ new VoltAgent({
   workflows: {
     expenseApprovalWorkflow,
   },
-  server: honoServer(),
+  server: honoServer({
+    configureApp: (app) => {
+      app.post("/query", createQueryHandler(db));
+    },
+  }),
   logger,
   observability,
   voltOpsClient: new VoltOpsClient({
