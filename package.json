@@ -13,6 +13,7 @@
     "volt": "volt"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "@voltagent/cli": "^0.1.10",
     "@voltagent/core": "^2.0.0",
     "@voltagent/libsql": "^2.0.0",
