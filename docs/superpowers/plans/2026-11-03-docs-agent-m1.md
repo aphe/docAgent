@@ -69,20 +69,20 @@ Expected: one commit on the default branch.
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `measureCorpus(root: string, opts?: { sampleLimit?: number }): Promise<CorpusReport>`; `CorpusReport = { root: string; totalFiles: number; byExtension: Record<string, number>; totalBytes: number; pdfSampled: number; pdfScanned: number; scannedShare: number; estOcrMinutes: number; ocrSecondsPerPage: number; avgPagesPerScannedPdf: number }`
+- Produces: `measureCorpus(root: string, opts?: { sampleLimit?: number }): Promise<CorpusReport>`; `CorpusReport = { root: string; totalFiles: number; byExtension: Record<string, number>; totalBytes: number; pdfSampled: number; noTextLayerPdfs: number; noTextLayerShare: number; avgPagesPerPdf: number }`
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 import { measureCorpus } from "../src/measure";
 
-test("counts extensions and reports scanned share", async () => {
+test("counts extensions and reports no-text-layer share", async () => {
   const r = await measureCorpus("test/fixtures/corpus", { sampleLimit: 10 });
   expect(r.byExtension[".docx"]).toBe(1);
   expect(r.byExtension[".pdf"]).toBe(2);
   expect(r.pdfSampled).toBe(2);
-  expect(r.pdfScanned).toBe(1);
-  expect(r.scannedShare).toBeCloseTo(0.5);
+  expect(r.noTextLayerPdfs).toBe(1);
+  expect(r.noTextLayerShare).toBeCloseTo(0.5);
 });
 ```
 
@@ -93,7 +93,7 @@ Expected: FAIL with "Cannot find module '../src/measure'"
 
 - [ ] **Step 3: Implement `measureCorpus(root: string, opts?: { sampleLimit?: number }): Promise<CorpusReport>` in `indexer/src/measure.ts`**
 
-Walk `root` recursively, skip hidden entries. Count by lowercased extension and sum bytes. For up to `sampleLimit` PDFs (default 50), extract text per page with `pdfjs-dist`; a page with fewer than 20 non-whitespace characters counts as scanned. A PDF is scanned if more than half its sampled pages are scanned. `estOcrMinutes` = scanned pages across the whole corpus (estimated as `avgPagesPerScannedPdf × count of scanned PDFs`) × `ocrSecondsPerPage` / 60, with `ocrSecondsPerPage` = 3 as an assumption, marked `[INFERENCE]` in the report output.
+Walk `root` recursively, skip hidden entries. Count by lowercased extension and sum bytes. For up to `sampleLimit` PDFs (default 50), extract text per page with `pdfjs-dist`; a PDF is no-text-layer if fewer than 20 non-whitespace characters exist across all sampled pages. Report counts only. No OCR estimate, no gating decision.
 
 - [ ] **Step 4: Implement the CLI in `indexer/src/cli.ts`**
 
@@ -326,7 +326,7 @@ git commit -m "feat: pdf parser with restricted and no-text-layer flags"
 
 ```ts
 test("chunk ids are doc_id:page:index and offsets map back into page text", () => {
-  const chunks = chunkDoc("d1", { pages: [{ page: 1, text: "A".repeat(10), source: "text" }], unreadable: false }, { maxChars: 4 });
+  const chunks = chunkDoc("d1", { pages: [{ page: 1, text: "A".repeat(10) }], unreadable: false }, { maxChars: 4 });
   expect(chunks.map(c => c.chunkId)).toEqual(["d1:1:0", "d1:1:1", "d1:1:2"]);
   expect(chunks[1].charStart).toBe(4);
   expect(chunks[1].charEnd).toBe(8);
@@ -530,6 +530,8 @@ git commit -m "feat: indexer run with dry-run"
 ```
 
 ---
+
+### Task 9: Retired — OCR vendoring is out of M1 scope (see spec §6, §11.3)
 
 ### Task 10: Vector index in libsql
 
