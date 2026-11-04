@@ -384,12 +384,13 @@ export async function applyRun(
     args: [runId, rootId, rootPath, startedAt, now],
   });
 
-  if (deleteIds.length > 0) {
-    await store.deleteByIds(deleteIds);
-  }
   if (newVectors.length > 0) {
     await store.upsert(newVectors);
   }
 
   await db.batch(statements, "write");
+
+  if (deleteIds.length > 0) {
+    await store.deleteByIds(deleteIds);
+  }
 }

@@ -351,3 +351,196 @@ test("embedTexts batches up to 96 texts and keeps order", async () => {
     vi.unstubAllGlobals();
   }
 });
+
+test("applyRun throws on vector length mismatch before any write", async () => {
+  const db = await openDb(":memory:");
+  try {
+    const upserted: unknown[] = [];
+    const deleted: string[][] = [];
+    const store: VectorStore = {
+      upsert: async (vectors) => {
+        upserted.push(vectors);
+      },
+      deleteByIds: async (ids) => {
+        deleted.push(ids);
+      },
+    };
+    const chunk: Chunk = {
+      chunkId: "d3:1:0",
+      docId: "d3",
+      page: 1,
+      idx: 0,
+      charStart: 0,
+      charEnd: 4,
+      text: "text",
+    };
+    const plan: ApplyPlan = {
+      unchanged: [],
+      newVersion: [],
+      moved: [],
+      added: [
+        {
+          file: { path: "a.pdf", versionKey: "v3", sha256: "sha3" },
+          isDuplicate: false,
+          docId: "d3",
+          parsed: { pages: [{ page: 1, text: "text" }], unreadable: false },
+          dates: { docId: "d3", topicKey: "", raw: [], isLampiran: false },
+        },
+      ],
+      pruned: [],
+    };
+
+    await expect(
+      applyRun(
+        db,
+        store,
+        plan,
+        new Map([["d3", [chunk]]]),
+        new Map([["d3:1:0", [0.1, 0.2]]]),
+        { byDoc: {}, supersedes: [] },
+        "run4",
+        "R",
+        "/root",
+        "2025-01-01T00:00:00Z",
+      ),
+    ).rejects.toThrow("1536");
+
+    expect(upserted).toHaveLength(0);
+    expect(deleted).toHaveLength(0);
+
+    const docs = await db.execute({
+      sql: "SELECT doc_id FROM documents",
+      args: [],
+    });
+    expect(docs.rows).toHaveLength(0);
+    const chunks = await db.execute({
+      sql: "SELECT chunk_id FROM chunks",
+      args: [],
+    });
+    expect(chunks.rows).toHaveLength(0);
+  } finally {
+    db.close();
+  }
+});
+
+test("newVersion shrink deletes only dropped chunk IDs after batch success", async () => {
+  const db = await openDb(":memory:");
+  try {
+    await seedDoc(db, "d1", "R", "v1");
+    await seedChunk(db, "d1:1:0", "d1", "v1", "old 0");
+    await seedChunk(db, "d1:1:1", "d1", "v1", "old 1");
+
+    const deleted: string[][] = [];
+    const upserted: unknown[] = [];
+    const store: VectorStore = {
+      upsert: async (vectors) => {
+        upserted.push(vectors);
+      },
+      deleteByIds: async (ids) => {
+        deleted.push(ids);
+      },
+    };
+
+    const chunk: Chunk = {
+      chunkId: "d1:1:0",
+      docId: "d1",
+      page: 1,
+      idx: 0,
+      charStart: 0,
+      charEnd: 5,
+      text: "new 0",
+    };
+    const plan: ApplyPlan = {
+      unchanged: [],
+      newVersion: [
+        {
+          docId: "d1",
+          file: { path: "a.pdf", versionKey: "v2", sha256: "sha2" },
+          parsed: { pages: [{ page: 1, text: "new 0" }], unreadable: false },
+          dates: { docId: "d1", topicKey: "", raw: [], isLampiran: false },
+        },
+      ],
+      moved: [],
+      added: [],
+      pruned: [],
+    };
+
+    await applyRun(
+      db,
+      store,
+      plan,
+      new Map([["d1", [chunk]]]),
+      new Map([["d1:1:0", fakeVector(0.3)]]),
+      {
+        byDoc: {
+          d1: { status: "active", statusConfidence: "high", alternates: [] },
+        },
+        supersedes: [],
+      },
+      "run5",
+      "R",
+      "/root",
+      "2025-01-01T00:00:00Z",
+    );
+
+    expect(deleted).toEqual([["d1:1:1"]]);
+    expect(upserted).toHaveLength(1);
+
+    const dropped = await db.execute({
+      sql: "SELECT chunk_id FROM chunks WHERE chunk_id = ?",
+      args: ["d1:1:1"],
+    });
+    expect(dropped.rows).toHaveLength(0);
+
+    const db2 = await openDb(":memory:");
+    try {
+      await seedDoc(db2, "d1", "R", "v1");
+      await seedChunk(db2, "d1:1:0", "d1", "v1", "old 0");
+      await seedChunk(db2, "d1:1:1", "d1", "v1", "old 1");
+
+      const deletedAfterFailure: string[][] = [];
+      const storeFail: VectorStore = {
+        upsert: async () => {},
+        deleteByIds: async (ids) => {
+          deletedAfterFailure.push(ids);
+        },
+      };
+      const failingDb = {
+        execute: db2.execute.bind(db2),
+        batch: async () => {
+          throw new Error("batch failed");
+        },
+      } as unknown as Client;
+
+      await expect(
+        applyRun(
+          failingDb,
+          storeFail,
+          plan,
+          new Map([["d1", [chunk]]]),
+          new Map([["d1:1:0", fakeVector(0.3)]]),
+          {
+            byDoc: {
+              d1: {
+                status: "active",
+                statusConfidence: "high",
+                alternates: [],
+              },
+            },
+            supersedes: [],
+          },
+          "run6",
+          "R",
+          "/root",
+          "2025-01-01T00:00:00Z",
+        ),
+      ).rejects.toThrow("batch failed");
+
+      expect(deletedAfterFailure).toHaveLength(0);
+    } finally {
+      db2.close();
+    }
+  } finally {
+    db.close();
+  }
+});
