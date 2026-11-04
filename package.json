@@ -20,10 +20,12 @@
     "@voltagent/server-hono": "^2.0.0",
     "ai": "^6.0.0",
     "dotenv": "^16.4.7",
+    "pdfjs-dist": "^4.10.38",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@cantoo/pdf-lib": "^2.11.1",
     "@types/node": "^22.10.5",
     "tsdown": "^0.15.2",
     "tsx": "^4.23.15",
