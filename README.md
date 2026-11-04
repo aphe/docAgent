@@ -57,6 +57,63 @@ npm run build
 npm start
 ```
 
+## 📥 Indexing documents
+
+The M1 corpus is local PDFs under `data-files/`. The indexer reads them, chunks the text, embeds the chunks, and writes everything to `data/docs-agent.db` (libsql). The app reads that database; it never writes to the source files.
+
+### 1. Add files
+
+- Put PDFs in `data-files/` (subfolders are fine).
+- Only `.pdf` is read. Other files are skipped and counted as `skippedNonPdf`.
+- No OCR. A scanned PDF with no text layer is recorded with `read_error = no-text-layer` and is not searchable.
+- Name each file `YYYYMMDD-<title>.pdf`. The normalized title groups versions of the same document, and the newest effective date is marked active; older ones are superseded. Folder names do not group documents.
+
+### 2. Preview (no writes)
+
+```bash
+pnpm exec tsx indexer/src/cli.ts index --root data-files --dry-run
+```
+
+### 3. Index and embed
+
+Embeddings call OpenRouter (`openai/text-embedding-3-small`), so `.env` needs:
+
+```env
+OPENROUTER_API_KEY=your-openrouter-key
+# optional
+# DB_PATH=data/docs-agent.db
+# MIN_TEXT_CHARS=20
+```
+
+```bash
+pnpm exec tsx indexer/src/cli.ts index --root data-files
+```
+
+The run prints a JSON summary: `added`, `newVersion`, `moved`, `pruned`, `duplicates`, `unparsable`, `noTextLayerPdfs`, `skippedNonPdf`, and `failures` (each unreadable file with its reason). Check `failures` after every run.
+
+Re-runs are incremental. Files are matched by path and SHA-256; unchanged files keep their vectors, and changed files are re-chunked and re-embedded.
+
+### 4. Measure a corpus (optional)
+
+```bash
+pnpm exec tsx indexer/src/cli.ts measure data-files
+```
+
+Reports the sampled PDF count, the share with no text layer, and average pages per PDF.
+
+### 5. Query
+
+Start the service with `pnpm dev` (the console prints the port), then:
+
+```bash
+curl -X POST http://localhost:3141/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What does the consumer protection SOP require?", "mode": "answer"}'
+```
+
+`mode` is `answer` or `draft`. `/query` returns retrieved passages with `[chunkId]` citations and no generated text. For a polished answer, use the agent endpoint `POST /agents/docAgent/text`; its reply includes a `tagCheck` result. API docs are at `/ui`.
+
+
 ## 🎯 Features
 
 This VoltAgent application includes:
