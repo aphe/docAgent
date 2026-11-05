@@ -38,7 +38,7 @@ Models via OpenRouter, OpenAI provider pinned, no fallback:
 ## 4. Data model
 
 libsql tables (one database file, `data/docs-agent.db`):
-- `documents`: `doc_id` (UUID, stored), `root_id`, `path` (relative to root), `topic_key` (parent directory, relative), `version_key` (sha256 of bytes), `sha256`, `drive_file_id` (nullable, for iteration 2), `document_number`, `issued_date`, `effective_date`, `raw_date_strings`, `status` (`active` | `superseded` | `unparsable`; date-derived only), `status_confidence` (`high` | `low`), `alternate_candidates`, `is_duplicate`, `read_error` (nullable: `copy-restricted` | `no-text-layer` | `parse-failed`; extraction-derived only), `last_seen_run`.
+- `documents`: `doc_id` (UUID, stored), `root_id`, `path` (relative to root), `topic_key` (normalized filename title, see `indexer/src/topic-key.ts`), `version_key` (sha256 of bytes), `sha256`, `drive_file_id` (nullable, for iteration 2), `document_number`, `issued_date`, `effective_date`, `raw_date_strings`, `status` (`active` | `superseded` | `unparsable`; date-derived only), `status_confidence` (`high` | `low`), `alternate_candidates`, `is_duplicate`, `read_error` (nullable: `copy-restricted` | `no-text-layer` | `parse-failed`; extraction-derived only), `last_seen_run`.
 - `chunks`: `chunk_id` (`doc_id:page:idx`), `doc_id`, `page`, `idx`, `char_start`, `char_end`, `text`, `version_key`.
 - `chunks_fts`: FTS5 over `chunks.text`.
 - `supersedes`: `doc_id`, `supersedes_doc_id`.
@@ -72,7 +72,7 @@ Fixed character windows inside each page. No chunk crosses a page boundary. `chu
 
 ## 8. Dates and supersession
 
-Dates are extracted with Indonesian patterns (`tanggal ditetapkan` → issued; `tanggal diundangkan` / `mulai berlaku` → effective; month names in Indonesian). No LLM pass.
+Dates are extracted with Indonesian patterns (`tanggal ditetapkan` → issued; `tanggal diundangkan` / `mulai berlaku` → effective; month names in Indonesian). No LLM pass. If no labeled issued date is found, the 8-digit `YYYYMMDD` filename prefix is used as the issued date (user ruling, 2026-11-03).
 
 Grouping: by `topic_key`. Ranking key: `effective_date`, falling back to `issued_date`.
 
@@ -91,9 +91,9 @@ Supersession is shown, not silently ranked. The user approved date-based superse
 
 Response:
 ```
-{ text: string, citations: Citation[], alternates: string[], warnings: string[], draft?: string }
+{ text: string, citations: Citation[], alternates: { docId: string, path: string }[], warnings: string[], draft?: string }
 ```
-`Citation`: `chunk_id`, `doc_id`, `path`, `page`, `char_start`, `char_end`, `status`, `status_confidence`, `stale`.
+`Citation`: `chunkId`, `docId`, `path`, `page`, `charStart`, `charEnd`, `status`, `statusConfidence`, `stale`.
 
 Behavior:
 - No relevant chunk → `text` says no source was found; `citations` is empty. No invented citation.
@@ -101,7 +101,7 @@ Behavior:
 - A citation whose `doc_id` version changed since indexing → `stale = true` and a warning.
 - `mode: "draft"` → `draft` contains the revised text. Nothing is written to disk or Drive.
 
-Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) merged with FTS5 top-K by reciprocal rank fusion.
+Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) with cosine distance at or below 0.5 merged with FTS5 top-K by reciprocal rank fusion.
 
 ## 10. Acceptance criteria
 
@@ -114,7 +114,7 @@ Search: vector top-K from `chunk_vectors` (libsql `vector_top_k`) merged with FT
 7. A copy-restricted PDF has `read_error = copy-restricted` and produces no chunks.
 8. A query with no match returns no citations and says no source was found.
 9. Changing the root path does not prune rows of another `root_id`.
-10. Indexing reads files locally. Only embedding requests leave the machine.
+10. Indexing reads files locally. Only embedding requests leave the machine. **Exception (user-approved):** VoltOps tracing, when keys are set, sends query text, retrieved passages, and LLM input/output to the VoltOps hosted service (`console.voltagent.dev`).
 11. Recall@5 and citation accuracy on the user's test questions meet the success bar (section 12).
 
 ## 11. Open items (must be resolved before build)

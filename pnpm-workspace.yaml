@@ -1,4 +1,4 @@
 allowBuilds:
-  '@biomejs/biome': set this to true or false
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
+  '@biomejs/biome': false
+  esbuild: false
+  protobufjs: false

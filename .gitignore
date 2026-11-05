@@ -163,3 +163,6 @@ data-files/*
 
 # Local index database (holds extracted corpus text)
 data/
+.idea/
+.superpowers/
+/.vitest/

@@ -13,6 +13,8 @@
     "volt": "volt"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@openrouter/ai-sdk-provider": "^2.10.0",
     "@voltagent/cli": "^0.1.10",
     "@voltagent/core": "^2.0.0",
     "@voltagent/libsql": "^2.0.0",
@@ -20,13 +22,16 @@
     "@voltagent/server-hono": "^2.0.0",
     "ai": "^6.0.0",
     "dotenv": "^16.4.7",
+    "pdfjs-dist": "^4.10.38",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@cantoo/pdf-lib": "^2.11.1",
     "@types/node": "^22.10.5",
+    "hono": "4.13.16",
     "tsdown": "^0.15.2",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.3",
     "vitest": "^5.1.0"
   },
